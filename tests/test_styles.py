@@ -1,4 +1,4 @@
-from tsql.styles import QMARK
+from tsql.styles import QMARK, NUMERIC, NAMED, FORMAT, PYFORMAT, NUMERIC_DOLLAR, ESCAPED
 
 
 def test_qmark_style():
@@ -12,5 +12,75 @@ def test_qmark_style():
     assert val1 == '?'
     assert val2 == '?'
     assert val3 == '?'
+    assert q.params == ['a', 'b', 'c']
+
+
+def test_numeric_style():
+    q = NUMERIC()
+    i = iter(q)
+    next(i)
+    val1 = i.send(('1', 'a'))
+    val2 = i.send(('2', 'b'))
+    val3 = i.send(('3', 'c'))
+
+    assert val1 == ':1'
+    assert val2 == ':2'
+    assert val3 == ':3'
+    assert q.params == ['a', 'b', 'c']
+
+
+def test_named_style():
+    q = NAMED()
+    i = iter(q)
+    next(i)
+    val1 = i.send(('name', 'a'))
+    val2 = i.send(('foo', 'b'))
+    val3 = i.send(('bar', 'c'))
+
+    assert val1 == ':name'
+    assert val2 == ':foo'
+    assert val3 == ':bar'
+    assert q.params == ['a', 'b', 'c']
+
+
+def test_format_style():
+    q = FORMAT()
+    i = iter(q)
+    next(i)
+    val1 = i.send(('name', 'a'))
+    val2 = i.send(('foo', 'b'))
+    val3 = i.send(('bar', 'c'))
+
+    assert val1 == '%s'
+    assert val2 == '%s'
+    assert val3 == '%s'
+    assert q.params == ['a', 'b', 'c']
+
+
+def test_pyformat_style():
+    q = PYFORMAT()
+    i = iter(q)
+    next(i)
+    val1 = i.send(('name', 'a'))
+    val2 = i.send(('foo', 'b'))
+    val3 = i.send(('bar', 'c'))
+
+    assert val1 == '%(name)s'
+    assert val2 == '%(foo)s'
+    assert val3 == '%(bar)s'
+    assert q.params == ['a', 'b', 'c']
+
+
+def test_numeric_dollar_style():
+    q = NUMERIC_DOLLAR()
+    i = iter(q)
+    next(i)
+    val1 = i.send(('name', 'a'))
+    val2 = i.send(('foo', 'b'))
+    val3 = i.send(('bar', 'c'))
+
+    assert val1 == '$1'
+    assert val2 == '$2'
+    assert val3 == '$3'
     assert q.params == ['a', 'b', 'c']
 

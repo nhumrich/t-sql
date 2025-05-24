@@ -1,3 +1,4 @@
+import re
 import string
 from typing import NamedTuple, Tuple, Any, Literal, Final, List, Dict
 from string.templatelib import Template, Interpolation
@@ -70,14 +71,13 @@ class TSQL:
     def _values(self) -> list[str]:
         return [v.value for v in self._sql_parts if isinstance(v, Parameter)]
 
-    def _check_literal(self, val: str):
+    @classmethod
+    def _check_literal(cls, val: str):
         if not isinstance(val, str) or not val.isidentifier():
             raise ValueError(f"Invalid literal {val}")
 
-    def _sqlize(self, val: Interpolation|Template) -> list[str|Parameter]:
-        if isinstance(val, tuple):
-            return TSQL(t"({tuple([self._sqlize(v) for v in val])})")._sql_parts
-
+    @classmethod
+    def _sqlize(cls, val: Interpolation|Template|Any) -> list[str|Parameter]:
         if isinstance(val, Interpolation):
             value = val.value
             formatter = string.Formatter()
@@ -88,7 +88,7 @@ class TSQL:
             print('i', val.format_spec, value, type(value))
             match val.format_spec, value:
                 case 'literal', str():
-                    self._check_literal(value)
+                    cls._check_literal(value)
                     return [value]
                 case 'unsafe', str():
                     return [value]
@@ -103,11 +103,17 @@ class TSQL:
                 # case 'as_array', list():
                 #     return [None]
                 case _, tuple():
-                    return self._sqlize(value)
+                    inner: list[str|Parameter] = ['(']
+                    for i, v in enumerate(value):
+                        if i > 0:
+                            inner.append(',')
+                        inner.append(Parameter(val.expression + f'_{i}', v))
+                    inner.append(')')
+                    return inner
                 case _, str():
                     return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
                 case _, int():
-                    return [val.value]
+                    return [Parameter(val.value, val.value)]
 
 
             return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
@@ -117,12 +123,12 @@ class TSQL:
             result = []
             for item in val:
                 if isinstance(item, Interpolation):
-                    result.extend(self._sqlize(item))
+                    result.extend(cls._sqlize(item))
                 else:
-                    result.append(item)
+                    result.append(re.sub(r'\s+', ' ', item))
             return result
 
-        raise ValueError(f"UNSAFE {val}")
+        raise ValueError(f"UNSAFE {val}") # this shouldnt happen and is for debugging
 
 
 def as_values(value_dict: dict[str, Any]):

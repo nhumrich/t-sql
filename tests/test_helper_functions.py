@@ -10,7 +10,7 @@ def test_as_values():
         'b': 'abc'
     }
     result = tsql.render(t"INSERT INTO test {values:as_values}")
-    assert result[0] == "INSERT INTO test (a,b) VALUES (1,'abc')"
+    assert result[0] == "INSERT INTO test (?,?) VALUES (?,?)"
 
 
 def test_insert():

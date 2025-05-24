@@ -1,20 +1,18 @@
 import abc
-from typing import Any, Tuple
 from itertools import count
 
 
 class ParamStyle(abc.ABC):
+    def __init__(self):
+        self.params = []
+
     @abc.abstractmethod
     def __iter__(self):
         raise NotImplementedError()
 
 class QMARK(ParamStyle):
     # WHERE name=?
-    def __init__(self):
-        self.params = []
-
     def __iter__(self):
-        values = []
         _, value = yield
         while True:
             self.params.append(value)
@@ -24,25 +22,51 @@ class QMARK(ParamStyle):
 class NUMERIC(ParamStyle):
     # WHERE name=:1
     def __iter__(self):
-        for i in count():
-            expression, value= yield
+        _, value = yield
+        counter = count()
+        next(counter) # we want to start at 1, so we burn 0 here
+        while c := next(counter):
+            self.params.append(value)
+            _, value = yield f':{c}'
 
 
 class NAMED(ParamStyle):
     # WHERE name=:name
-    pass
+    def __iter__(self):
+        name, value = yield
+        while True:
+            self.params.append(value)
+            name, value = yield f':{name}'
+
 
 class FORMAT(ParamStyle):
     # WHERE name=%s
-    pass
+    def __iter__(self):
+        _, value = yield
+        while True:
+            self.params.append(value)
+            _, value = yield '%s'
+
 
 class PYFORMAT(FORMAT):
-    # WHERE name=$(name)s
-    pass
+    # WHERE name=%(name)s
+    def __iter__(self):
+        name, value = yield
+        while True:
+            self.params.append(value)
+            name, value = yield f'%({name})s'
+
 
 class NUMERIC_DOLLAR(ParamStyle):
     # WHERE name=$1
-    pass
+    def __iter__(self):
+        _, value = yield
+        counter = count()
+        next(counter)  # we want to start at 1, so we burn 0 here
+        while c := next(counter):
+            self.params.append(value)
+            _, value = yield f'${c}'
+
 
 class ESCAPED(ParamStyle):
     # WHERE name='value'

@@ -1,6 +1,6 @@
 import re
 import string
-from typing import NamedTuple, Tuple, Any, Literal, Final, List, Dict
+from typing import NamedTuple, Tuple, Any, List, Dict, Iterable
 from string.templatelib import Template, Interpolation
 
 from tsql.styles import ParamStyle, QMARK
@@ -75,6 +75,7 @@ class TSQL:
     def _check_literal(cls, val: str):
         if not isinstance(val, str) or not val.isidentifier():
             raise ValueError(f"Invalid literal {val}")
+        return val
 
     @classmethod
     def _sqlize(cls, val: Interpolation|Template|Any) -> list[str|Parameter]:
@@ -131,10 +132,42 @@ class TSQL:
         raise ValueError(f"UNSAFE {val}") # this shouldnt happen and is for debugging
 
 
+def t_join(part: Template, collection: Iterable[Template|TSQL]):
+    final = t''
+    for i, section in enumerate(collection):
+        if i == 0:
+            final = section
+        else:
+            final += part + section
+    return final
+
+
+
 def as_values(value_dict: dict[str, Any]):
-    return TSQL(t"{tuple([t"{k:literal}" for k in value_dict.keys()])}"
-                  " VALUES "
-                  t"{tuple([t"{i}" for i in value_dict.values()])}")
+    """Convert a dictionary to SQL column list and VALUES clause"""
+    keys = list(value_dict.keys())
+    values = list(value_dict.values())
+    
+    # Build column list: (col1, col2, col3)
+    column_parts = ['(']
+    for i, key in enumerate(keys):
+        if i > 0:
+            column_parts.append(', ')
+        column_parts.append(key)
+    column_parts.append(')')
+    
+    # Build values list: (?, ?, ?)
+    value_parts = [' VALUES (']
+    for i, value in enumerate(values):
+        if i > 0:
+            value_parts.append(', ')
+        value_parts.append(Parameter(f'value_{i}', value))
+    value_parts.append(')')
+    
+    # Create TSQL object manually
+    tsql_obj = TSQL.__new__(TSQL)
+    tsql_obj._sql_parts = column_parts + value_parts
+    return tsql_obj
 
 
 def render(query: Template|TSQL, style=None) -> RenderedQuery:
@@ -144,6 +177,47 @@ def render(query: Template|TSQL, style=None) -> RenderedQuery:
     return query.render(style=style)
 
 
-# def as_array(values: list[str]) -> TSQL:
-#     return
+def select(table, ids:str|int|list[str|int]=None, *, columns=None):
+    """Helper function to build basic SELECT queries"""
+
+    if not columns:
+        t_columns = t'*'
+    else:
+        t_columns = t_join(t', ', [t'{c:literal}' for c in columns])
+
+    where_clause = t""
+    if ids is not None:
+        match ids:
+            case list():
+                where_clause = t" WHERE id in {tuple(ids)}"
+            case tuple():
+                where_clause = f" WHERE id in {ids}"
+            case int():
+                where_clause = f" WHERE id = {ids}"
+            case str():
+                where_clause = f" WHERE id = {ids}"
+
+    return TSQL(t'SELECT {t_columns} FROM {table:literal}{where_clause}')
+
+
+def insert(table: str, values: dict[str, Any], ignore_conflict=False):
+    """Helper function to build INSERT queries"""
+
+    if not isinstance(values, dict):
+        raise TypeError("values must be a dict")
+
+    conflict_clause = t""
+    if ignore_conflict:
+        conflict_clause = t" ON CONFLICT DO NOTHING"
+
+    return TSQL(t"INSERT INTO {table:literal} {values:as_values}{conflict_clause} RETURNING *")
+
+
+def update(table: str, values: dict[str, Any], id: str):
+    """Helper function to build UPDATE queries for a single row"""
+
+    if not isinstance(values, dict):
+        raise ValueError("values must be a dictionary")
+    
+    return TSQL(t"UPDATE {table:literal} SET {values:as_values} WHERE id = {id} RETURNING *")
 

@@ -2,7 +2,7 @@ import tsql
 import tsql.styles
 
 
-def test_none_stays_a_none_when_escaped():
+def test_none_stays_a_none_when_parameterized():
     val = None
     id_ = 'something'
     result = tsql.render(t"UPDATE users SET name = {val} WHERE id = {id_}")

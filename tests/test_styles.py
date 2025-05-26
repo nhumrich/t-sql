@@ -84,3 +84,21 @@ def test_numeric_dollar_style():
     assert val3 == '$3'
     assert q.params == ['a', 'b', 'c']
 
+
+def test_escaped_style():
+    q = ESCAPED()
+    i = iter(q)
+    next(i)
+    val1 = i.send(('name', 'test\'value'))
+    val2 = i.send(('foo', None))
+    val3 = i.send(('bar', 42))
+    val4 = i.send(('active', True))
+    val5 = i.send(('disabled', False))
+
+    assert val1 == "'test''value'"
+    assert val2 == 'NULL'
+    assert val3 == '42'
+    assert val4 == 'TRUE'
+    assert val5 == 'FALSE'
+    assert q.params == []
+

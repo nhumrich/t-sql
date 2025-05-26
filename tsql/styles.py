@@ -70,9 +70,6 @@ class NUMERIC_DOLLAR(ParamStyle):
 
 class ESCAPED(ParamStyle):
     # WHERE name='value'
-    def __init__(self):
-        self.params = []
-
     def __iter__(self):
         _, value = yield
         while True:
@@ -84,6 +81,10 @@ class ESCAPED(ParamStyle):
                 return f"'{value.replace("'", "''")}'"
             case None:
                 return "NULL"
-
-    def escape(self):
-        return
+            case bool():
+                return "TRUE" if value else "FALSE"
+            case int() | float():
+                return str(value)
+            case _:
+                # For other types, convert to string and escape
+                return f"'{str(value).replace("'", "''")}'"

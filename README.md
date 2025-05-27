@@ -86,7 +86,7 @@ You can use the "unsafe" format spec for these
 cases:
 ```python
 dynamic_where = input('type where clause')
-tsql.render(f"SELECT * FROM users WHERE {dynamic_where:unsafe}")
+tsql.render(t"SELECT * FROM users WHERE {dynamic_where:unsafe}")
 ```
 
 ### as_values

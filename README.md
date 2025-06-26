@@ -9,6 +9,23 @@ This library requires Python 3.14b1 or newer.
 
 TSQL is built specifically to take advantage of the new t-string feature introduced in PEP 750, which is only available in Python 3.14+.
 
+## Installing
+
+```
+# with pip
+pip install t-sql
+
+# with uv
+uv add t-sql
+```
+
+## using
+
+```
+import tsql
+
+tsql.render(t"select * from users where name={name)")
+```
 
 ## Parameter Styles
 

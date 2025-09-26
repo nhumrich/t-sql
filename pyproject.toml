@@ -5,7 +5,10 @@ description = "Safe SQL. SQL queries for python t-strings (PEP 750)"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []
-homepage = "https://github.com/nhumrich/tsql"
+
+[project.urls]
+Homepage = "https://github.com/nhumrich/tsql"
+
 
 [dependency-groups]
 dev = [

@@ -5,7 +5,7 @@ A lightweight SQL templating library that leverages Python 3.14's t-strings (PEP
 TSQL provides a safe way to write SQL queries using Python's template strings (t-strings) while preventing SQL injection attacks through multiple parameter styling options.
 
 ## ⚠️ Python Version Requirement
-This library requires Python 3.14b1 or newer.
+This library requires Python 3.14+
 
 TSQL is built specifically to take advantage of the new t-string feature introduced in PEP 750, which is only available in Python 3.14+.
 
@@ -110,6 +110,11 @@ tsql.render(t"SELECT * FROM users WHERE {dynamic_where:unsafe}")
 
 The spec `:as_values` formats a dictionary into the format:
 `(key1, key2, ...) VALUES (value1, value2, ...)` for uses in insert statements.
+
+### as_set
+
+The spec `:as_set` formats a dictionary into the format:
+`key1='?', key2='?'` for uses in update statements.
 
 ### traditional format_spec
 

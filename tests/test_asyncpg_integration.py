@@ -6,12 +6,11 @@ import tsql.styles
 
 
 # Test configuration
-DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres"
+DATABASE_URL = "postgresql://postgres:password@localhost:5454/postgres"
 
 
 @pytest.fixture
 async def conn():
-    """Helper to set up a clean test table and return a connection"""
     conn = await asyncpg.connect(DATABASE_URL)
 
     await conn.execute("""
@@ -32,10 +31,6 @@ async def conn():
 
 
 async def test_escaped_style_with_postgres(conn):
-    """Test ESCAPED style works correctly with PostgreSQL"""
-
-    # Insert data using ESCAPED style
-
     values = dict(
         name = "John O'Connor",
         age = 30,
@@ -55,7 +50,6 @@ async def test_escaped_style_with_postgres(conn):
     assert "TRUE" in query
     assert "75000.5" in query
 
-    # Execute the query
     await conn.execute(query)
 
     # Verify data was inserted correctly
@@ -67,10 +61,6 @@ async def test_escaped_style_with_postgres(conn):
 
 
 async def test_numeric_dollar_style_with_asyncpg(conn):
-    """Test NUMERIC_DOLLAR style works correctly with PostgreSQL"""
-
-    # Insert data using ESCAPED style
-
     values = dict(
         name="John O'Connor",
         age=30,
@@ -88,7 +78,6 @@ async def test_numeric_dollar_style_with_asyncpg(conn):
     assert "$3" in query
     assert "'$4" in query
 
-    # Execute the query
     await conn.execute(query)
 
     # Verify data was inserted correctly
@@ -100,8 +89,6 @@ async def test_numeric_dollar_style_with_asyncpg(conn):
 
 
 async def test_escaped_prevents_sql_injection_in_db(conn):
-    """Test that ESCAPED style prevents SQL injection in real database"""
-
     # Attempt SQL injection
     malicious_name = "'; DROP TABLE test_users; --"
     age = 25
@@ -111,11 +98,9 @@ async def test_escaped_prevents_sql_injection_in_db(conn):
         style=tsql.styles.ESCAPED
     )
 
-    # Verify the malicious input is properly escaped
     assert params == []
     assert "'''; DROP TABLE test_users; --'" in query
 
-    # Execute the query - this should safely insert the malicious string as data
     await conn.execute(query)
 
     # Verify the table still exists and contains the escaped data
@@ -129,8 +114,6 @@ async def test_escaped_prevents_sql_injection_in_db(conn):
 
 
 async def test_numeric_dollar_style_with_asyncpg(conn):
-    """Test NUMERIC_DOLLAR style works natively with asyncpg"""
-
     name = "David Wilson"
     age = 33
 
@@ -143,7 +126,6 @@ async def test_numeric_dollar_style_with_asyncpg(conn):
     assert "$1" in query and "$2" in query
     assert params == ["David Wilson", 33]
 
-    # Execute directly (no conversion needed)
     await conn.execute(query, *params)
 
     # Verify data was inserted correctly
@@ -153,8 +135,6 @@ async def test_numeric_dollar_style_with_asyncpg(conn):
 
 
 async def test_escaped_handles_null_values_in_db(conn):
-    """Test ESCAPED style handles NULL values correctly in database"""
-
     name = None
     age = 30
 
@@ -167,17 +147,14 @@ async def test_escaped_handles_null_values_in_db(conn):
     assert "NULL" in query
     assert "30" in query
 
-    # Execute the query
     await conn.execute(query)
 
-    # Verify NULL was inserted correctly
     row = await conn.fetchrow("SELECT * FROM test_users WHERE age = $1", 30)
     assert row['name'] is None
     assert row['age'] == 30
 
 
 async def test_escaped_complex_query_with_db(conn):
-    """Test ESCAPED style with complex query involving multiple conditions"""
     # Insert some test data first
     await conn.execute("""
         INSERT INTO test_users (name, age, active, salary) VALUES 
@@ -201,7 +178,6 @@ async def test_escaped_complex_query_with_db(conn):
     assert "'O''Brien'" in query  # Single quote should be escaped
     assert "TRUE" in query
 
-    # Execute the query
     rows = await conn.fetch(query)
 
     # Should find Charlie O'Brien
@@ -212,21 +188,16 @@ async def test_escaped_complex_query_with_db(conn):
 
 
 async def test_compare_escaped_vs_parameterized(conn):
-    """Compare ESCAPED vs parameterized query results"""
-
-    # Test data
     name = "Test User"
     age = 25
     active = True
 
-    # Insert using ESCAPED style
     query1, params1 = tsql.render(
         t"INSERT INTO test_users (name, age, active) VALUES ({name}, {age}, {active})",
         style=tsql.styles.ESCAPED
     )
     await conn.execute(query1)
 
-    # Insert using NUMERIC_DOLLAR style
     query2, params2 = tsql.render(
         t"INSERT INTO test_users (name, age, active) VALUES ({name}, {age}, {active})",
         style=tsql.styles.NUMERIC_DOLLAR
@@ -245,16 +216,13 @@ async def test_compare_escaped_vs_parameterized(conn):
 
 
 async def test_escaped_handles_union_attack(conn):
-    """Test prevention of UNION-based injection"""
-    # malicious_input = "' UNION SELECT password FROM test_users WHERE '1'='1"
-    malicious_input = "11"
+    malicious_input = "' UNION SELECT password FROM test_users WHERE '1'='1"
     query, _ = tsql.render(t"SELECT * FROM test_users WHERE name = {malicious_input}", style=tsql.styles.ESCAPED)
     rows = await conn.fetch(query)
     assert len(rows) == 0
 
 
 async def test_escaped_handles_boolean_injection(conn):
-    """Test prevention of boolean-based injection"""
     malicious_input = "' OR '1'='1"
     query, _ = tsql.render(t"SELECT * FROM test_users WHERE name = {malicious_input}", style=tsql.styles.ESCAPED)
     rows = await conn.fetch(query)
@@ -262,7 +230,6 @@ async def test_escaped_handles_boolean_injection(conn):
 
 
 async def test_escaped_handles_comment_injection(conn):
-    """Test prevention of comment-based injection"""
     malicious_input = "admin'--"
     query, _ = tsql.render(t"SELECT * FROM test_users WHERE name = {malicious_input}", style=tsql.styles.ESCAPED)
     rows = await conn.fetch(query)

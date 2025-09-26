@@ -21,12 +21,28 @@ def test_as_values():
         'age': 30
     }
     result = tsql.render(t"INSERT INTO users {values:as_values}")
-    
+
     # Should generate INSERT INTO users (name, age) VALUES (?, ?)
     assert "INSERT INTO users" in result[0]
     assert "name" in result[0] and "age" in result[0]
     assert "VALUES" in result[0]
     assert result[1] == ['John', 30]
+
+
+def test_as_set():
+    """Test the as_set format specifier"""
+    values = {
+        'name': 'John Updated',
+        'age': 35
+    }
+    result = tsql.render(t"UPDATE users SET {values:as_set} WHERE id = {123}")
+
+    # Should generate UPDATE users SET name = ?, age = ? WHERE id = ?
+    assert "UPDATE users SET" in result[0]
+    assert "name = ?" in result[0]
+    assert "age = ?" in result[0]
+    assert "WHERE id = ?" in result[0]
+    assert result[1] == ['John Updated', 35, 123]
 
 
 def test_insert():

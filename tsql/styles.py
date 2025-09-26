@@ -85,6 +85,10 @@ class ESCAPED(ParamStyle):
                 return "TRUE" if value else "FALSE"
             case int() | float():
                 return str(value)
+            case bytes():
+                # Convert binary data to hex literal - safe from injection since hex only contains [0-9A-F]
+                hex_data = value.hex()
+                return f"'\\x{hex_data}'"
             case _:
                 # For other types, convert to string and escape
                 return f"'{str(value).replace("'", "''")}'"

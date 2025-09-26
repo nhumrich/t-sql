@@ -44,7 +44,6 @@ class TSQL:
         self._sql_parts = self._sqlize(template_string)
 
     def render(self, style:ParamStyle = None) -> RenderedQuery:
-        print(self._sql_parts)
         if style is None:
             style = default_style
         result = ''
@@ -86,7 +85,6 @@ class TSQL:
             if val.conversion:
                 value = formatter.convert_field(value, val.conversion)
 
-            print('i', val.format_spec, value, type(value))
             match val.format_spec, value:
                 case 'literal', str():
                     cls._check_literal(value)
@@ -95,6 +93,8 @@ class TSQL:
                     return [value]
                 case 'as_values', dict():
                     return as_values(value)._sql_parts
+                case 'as_set', dict():
+                    return as_set(value)._sql_parts
                 case '', TSQL():
                     return val.value._sql_parts
                 case "", Template():
@@ -113,6 +113,8 @@ class TSQL:
                     return inner
                 case _, str():
                     return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
+                case _, bytes():
+                    return [Parameter(val.expression, value)]
                 case _, int():
                     return [Parameter(val.value, val.value)]
 
@@ -120,7 +122,6 @@ class TSQL:
             return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
 
         if isinstance(val, Template):
-            print('t', val)
             result = []
             for item in val:
                 if isinstance(item, Interpolation):
@@ -147,7 +148,7 @@ def as_values(value_dict: dict[str, Any]):
     """Convert a dictionary to SQL column list and VALUES clause"""
     keys = list(value_dict.keys())
     values = list(value_dict.values())
-    
+
     # Build column list: (col1, col2, col3)
     column_parts = ['(']
     for i, key in enumerate(keys):
@@ -155,7 +156,7 @@ def as_values(value_dict: dict[str, Any]):
             column_parts.append(', ')
         column_parts.append(key)
     column_parts.append(')')
-    
+
     # Build values list: (?, ?, ?)
     value_parts = [' VALUES (']
     for i, value in enumerate(values):
@@ -163,10 +164,30 @@ def as_values(value_dict: dict[str, Any]):
             value_parts.append(', ')
         value_parts.append(Parameter(f'value_{i}', value))
     value_parts.append(')')
-    
+
     # Create TSQL object manually
     tsql_obj = TSQL.__new__(TSQL)
     tsql_obj._sql_parts = column_parts + value_parts
+    return tsql_obj
+
+
+def as_set(value_dict: dict[str, Any]):
+    """Convert a dictionary to SQL SET clause for UPDATE statements"""
+    keys = list(value_dict.keys())
+    values = list(value_dict.values())
+
+    # Build SET clause: col1 = ?, col2 = ?, col3 = ?
+    set_parts = []
+    for i, (key, value) in enumerate(zip(keys, values)):
+        if i > 0:
+            set_parts.append(', ')
+        set_parts.append(key)
+        set_parts.append(' = ')
+        set_parts.append(Parameter(f'value_{i}', value))
+
+    # Create TSQL object manually
+    tsql_obj = TSQL.__new__(TSQL)
+    tsql_obj._sql_parts = set_parts
     return tsql_obj
 
 
@@ -219,5 +240,5 @@ def update(table: str, values: dict[str, Any], id: str):
     if not isinstance(values, dict):
         raise ValueError("values must be a dictionary")
     
-    return TSQL(t"UPDATE {table:literal} SET {values:as_values} WHERE id = {id} RETURNING *")
+    return TSQL(t"UPDATE {table:literal} SET {values:as_set} WHERE id = {id} RETURNING *")
 

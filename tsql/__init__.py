@@ -212,11 +212,11 @@ def select(table, ids:str|int|list[str|int]=None, *, columns=None):
             case list():
                 where_clause = t" WHERE id in {tuple(ids)}"
             case tuple():
-                where_clause = f" WHERE id in {ids}"
+                where_clause = t" WHERE id in {ids}"
             case int():
-                where_clause = f" WHERE id = {ids}"
+                where_clause = t" WHERE id = {ids}"
             case str():
-                where_clause = f" WHERE id = {ids}"
+                where_clause = t" WHERE id = {ids}"
 
     return TSQL(t'SELECT {t_columns} FROM {table:literal}{where_clause}')
 

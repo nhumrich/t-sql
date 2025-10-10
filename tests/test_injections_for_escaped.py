@@ -141,23 +141,17 @@ async def test_malicious_data_stored_safely(conn):
 
 
 
-async def test_error_based_injection_patterns():
-    error_attacks = [
-        "' AND (SELECT TOP 1 name FROM sysobjects WHERE xtype='U') > 0 --",
-        "' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e)) --",
-        "' AND (SELECT * FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a) --"
-    ]
+@pytest.mark.parametrize("attack", [
+    "' AND (SELECT TOP 1 name FROM sysobjects WHERE xtype='U') > 0 --",
+    "' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e)) --",
+    "' AND (SELECT * FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a) --"
+])
+async def test_error_based_injection_patterns(attack, conn):
+    query, params = tsql.render(t"SELECT * FROM users WHERE id = {attack}")
+    assert query == "SELECT * FROM users WHERE id = ?"
+    assert params == [attack]
 
-    for attack in error_attacks:
-        # Test parameterized style (default)
-        query, params = tsql.render(t"SELECT * FROM users WHERE id = {attack}", s)
-
-        rows = await conn.fetch(query)
-        assert result[0] == "SELECT * FROM users WHERE id = ?"
-        assert result[1] == [attack]
-
-        # Test ESCAPED style
-        result_escaped = tsql.render(t"SELECT * FROM users WHERE id = {attack}", style=tsql.styles.ESCAPED)
-        expected_escaped = attack.replace("'", "''")
-        assert result_escaped[0] == f"SELECT * FROM users WHERE id = '{expected_escaped}'"
-        assert result_escaped[1] == []
+    query_escaped, params_escaped = tsql.render(t"SELECT * FROM users WHERE id = {attack}", style=tsql.styles.ESCAPED)
+    expected_escaped = attack.replace("'", "''")
+    assert query_escaped == f"SELECT * FROM users WHERE id = '{expected_escaped}'"
+    assert params_escaped == []

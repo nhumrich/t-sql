@@ -104,15 +104,51 @@ def test_select_complex():
     """Test select with multiple clauses"""
     min_age = 18
     status = 'active'
-    
+
     query = tsql.select(
         'users', columns=[
         'name', 'email'],
         ids=['a', 'b']
     )
-    
+
     result = tsql.render(query)
-    
+
     assert "SELECT name, email FROM users" in result[0]
     assert "WHERE id in (?,?)" in result[0]
     assert result[1] == ['a', 'b']
+
+
+def test_select_string_id_injection():
+    """Test that select() with malicious string id is properly parameterized"""
+    malicious_id = "1 OR 1=1"
+
+    result = tsql.select('users', malicious_id)
+    query, params = result.render()
+
+    # Should be parameterized, not directly embedded
+    assert "1 OR 1=1" not in query
+    assert "?" in query
+    assert params == [malicious_id]
+
+
+def test_select_tuple_id_injection():
+    """Test that select() with malicious tuple is properly parameterized"""
+    malicious_tuple = ("1", "2'; DROP TABLE users; --")
+
+    result = tsql.select('users', malicious_tuple)
+    query, params = result.render()
+
+    # Should be parameterized, not directly embedded
+    assert "DROP TABLE users" not in query
+    assert "?" in query
+    assert malicious_tuple[1] in params
+
+
+def test_select_int_id_safe():
+    """Test that select() with int id works correctly"""
+    result = tsql.select('users', 42)
+    query, params = result.render()
+
+    # Int should be parameterized
+    assert "?" in query
+    assert params == [42]

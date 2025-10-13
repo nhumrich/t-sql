@@ -234,3 +234,94 @@ async def test_escaped_handles_comment_injection(conn):
     query, _ = tsql.render(t"SELECT * FROM test_users WHERE name = {malicious_input}", style=tsql.styles.ESCAPED)
     rows = await conn.fetch(query)
     assert len(rows) == 0
+
+
+async def test_upsert_insert_new_row(conn):
+    """Test upsert inserts a new row when no conflict exists"""
+    values = {
+        'id': 1,
+        'name': 'Alice',
+        'age': 30
+    }
+
+    query = tsql.upsert('test_users', values, conflict_on='id')
+    sql, params = query.render(style=tsql.styles.NUMERIC_DOLLAR)
+
+    result = await conn.fetchrow(sql, *params)
+
+    assert result['id'] == 1
+    assert result['name'] == 'Alice'
+    assert result['age'] == 30
+
+
+async def test_upsert_updates_on_conflict(conn):
+    """Test upsert updates existing row on conflict"""
+    # Insert initial row
+    await conn.execute(
+        "INSERT INTO test_users (id, name, age) VALUES ($1, $2, $3)",
+        1, 'Alice', 30
+    )
+
+    # Upsert with same id but different values
+    values = {
+        'id': 1,
+        'name': 'Alice Updated',
+        'age': 31
+    }
+
+    query = tsql.upsert('test_users', values, conflict_on='id')
+    sql, params = query.render(style=tsql.styles.NUMERIC_DOLLAR)
+
+    result = await conn.fetchrow(sql, *params)
+
+    # Should update the existing row
+    assert result['id'] == 1
+    assert result['name'] == 'Alice Updated'
+    assert result['age'] == 31
+
+    # Verify only one row exists
+    count = await conn.fetchval("SELECT COUNT(*) FROM test_users")
+    assert count == 1
+
+
+async def test_upsert_multiple_conflict_columns(conn):
+    """Test upsert with composite unique constraint"""
+    # Create a table with composite unique constraint
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS test_emails (
+            user_id INTEGER,
+            email VARCHAR(100),
+            verified BOOLEAN,
+            UNIQUE(user_id, email)
+        )
+    """)
+
+    try:
+        # Insert initial row
+        await conn.execute(
+            "INSERT INTO test_emails (user_id, email, verified) VALUES ($1, $2, $3)",
+            1, 'alice@example.com', False
+        )
+
+        # Upsert with same user_id and email
+        values = {
+            'user_id': 1,
+            'email': 'alice@example.com',
+            'verified': True
+        }
+
+        query = tsql.upsert('test_emails', values, conflict_on=['user_id', 'email'])
+        sql, params = query.render(style=tsql.styles.NUMERIC_DOLLAR)
+
+        result = await conn.fetchrow(sql, *params)
+
+        # Should update verified status
+        assert result['user_id'] == 1
+        assert result['email'] == 'alice@example.com'
+        assert result['verified'] is True
+
+        # Verify only one row exists
+        count = await conn.fetchval("SELECT COUNT(*) FROM test_emails")
+        assert count == 1
+    finally:
+        await conn.execute("DROP TABLE IF EXISTS test_emails")

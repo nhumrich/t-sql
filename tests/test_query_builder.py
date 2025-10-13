@@ -1,5 +1,5 @@
 import tsql
-from tsql.query_builder import table, Column, Condition
+from tsql.query_builder import table, Column, Condition, UpdateBuilder, DeleteBuilder
 
 
 @table('users')
@@ -388,3 +388,145 @@ def test_where_with_tstring_complex():
     assert 'WHERE users.id > ?' in sql
     assert 'AND (username ILIKE ? OR email ILIKE ?)' in sql
     assert params == [5, 'john', 'jane']
+
+
+def test_table_insert():
+    """Test table.insert() method"""
+    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'})
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
+    assert 'username' in sql and 'email' in sql
+    assert 'VALUES' in sql
+    assert 'RETURNING *' in sql
+    assert params == ['bob', 'bob@example.com']
+
+
+def test_table_insert_ignore_conflict():
+    """Test table.insert() with ignore_conflict"""
+    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}, ignore_conflict=True)
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
+    assert 'ON CONFLICT DO NOTHING' in sql
+    assert 'RETURNING *' in sql
+
+
+def test_table_upsert():
+    """Test table.upsert() method"""
+    query = Users.upsert({'email': 'bob@example.com', 'username': 'bob'}, conflict_on='email')
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
+    assert 'ON CONFLICT (email)' in sql
+    assert 'DO UPDATE SET' in sql
+    assert 'username = EXCLUDED.username' in sql
+    assert 'RETURNING *' in sql
+
+
+def test_table_upsert_with_column_object():
+    """Test table.upsert() with Column object"""
+    query = Users.upsert({'email': 'bob@example.com', 'username': 'bob'}, conflict_on=Users.email)
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
+    assert 'ON CONFLICT (email)' in sql
+    assert 'DO UPDATE SET' in sql
+    assert 'username = EXCLUDED.username' in sql
+    assert 'RETURNING *' in sql
+
+
+def test_table_upsert_with_multiple_column_objects():
+    """Test table.upsert() with multiple Column objects"""
+    query = Users.upsert(
+        {'email': 'bob@example.com', 'username': 'bob', 'created_at': '2024-01-01'},
+        conflict_on=[Users.email, Users.username]
+    )
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
+    assert 'ON CONFLICT (email, username)' in sql
+    assert 'DO UPDATE SET' in sql
+    assert 'created_at = EXCLUDED.created_at' in sql
+    assert 'RETURNING *' in sql
+
+
+def test_table_update_with_where():
+    """Test table.update() with WHERE clause"""
+    builder = Users.update({'username': 'bob_updated'}).where(Users.id == 5)
+    assert isinstance(builder, UpdateBuilder)
+
+    sql, params = builder.render()
+
+    assert 'UPDATE users SET' in sql
+    assert 'username = ?' in sql
+    assert 'WHERE users.id = ?' in sql
+    assert 'RETURNING *' in sql
+    assert params == ['bob_updated', 5]
+
+
+def test_table_update_multiple_conditions():
+    """Test table.update() with multiple WHERE conditions"""
+    builder = (Users.update({'username': 'bob_updated', 'email': 'new@example.com'})
+               .where(Users.id > 10)
+               .where(Users.created_at == None))
+
+    sql, params = builder.render()
+
+    assert 'UPDATE users SET' in sql
+    assert 'WHERE users.id > ?' in sql
+    assert 'AND users.created_at IS NULL' in sql
+    assert 'RETURNING *' in sql
+    assert params == ['bob_updated', 'new@example.com', 10]
+
+
+def test_table_delete_with_where():
+    """Test table.delete() with WHERE clause"""
+    builder = Users.delete().where(Users.id == 5)
+    assert isinstance(builder, DeleteBuilder)
+
+    sql, params = builder.render()
+
+    assert 'DELETE FROM users' in sql
+    assert 'WHERE users.id = ?' in sql
+    assert 'RETURNING *' in sql
+    assert params == [5]
+
+
+def test_table_delete_multiple_conditions():
+    """Test table.delete() with multiple WHERE conditions"""
+    builder = (Users.delete()
+               .where(Users.id > 100)
+               .where(Users.email == None))
+
+    sql, params = builder.render()
+
+    assert 'DELETE FROM users' in sql
+    assert 'WHERE users.id > ?' in sql
+    assert 'AND users.email IS NULL' in sql
+    assert 'RETURNING *' in sql
+    assert params == [100]
+
+
+def test_update_with_t_string_where():
+    """Test UpdateBuilder with raw t-string WHERE clause"""
+    min_age = 18
+    builder = Users.update({'username': 'adult'}).where(t"age >= {min_age}")
+
+    sql, params = builder.render()
+
+    assert 'UPDATE users SET' in sql
+    assert 'WHERE (age >= ?)' in sql
+    assert params == ['adult', 18]
+
+
+def test_delete_with_t_string_where():
+    """Test DeleteBuilder with raw t-string WHERE clause"""
+    pattern = '%test%'
+    builder = Users.delete().where(t"email LIKE {pattern}")
+
+    sql, params = builder.render()
+
+    assert 'DELETE FROM users' in sql
+    assert 'WHERE (email LIKE ?)' in sql
+    assert params == ['%test%']

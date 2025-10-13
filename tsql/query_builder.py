@@ -3,7 +3,7 @@ from string.templatelib import Template
 from functools import wraps
 from datetime import datetime
 
-from tsql import TSQL, t_join
+from tsql import TSQL, t_join, insert as tsql_insert, upsert as tsql_upsert, delete as tsql_delete, as_set
 
 # Optional SQLAlchemy support
 try:
@@ -126,6 +126,104 @@ class Join:
         join_type = self.join_type
         condition_tsql = self.condition.to_tsql()
         return t'{join_type:unsafe} JOIN {table_name:literal} ON {condition_tsql}'
+
+
+class UpdateBuilder:
+    """Fluent interface for building UPDATE queries"""
+
+    def __init__(self, base_table: 'Table', values: dict[str, Any]):
+        self.base_table = base_table
+        self.values = values
+        self._conditions: List[Union[Condition, Template]] = []
+
+    def where(self, condition: Union[Condition, Template]) -> 'UpdateBuilder':
+        """Add a WHERE condition (multiple calls are ANDed together)"""
+        self._conditions.append(condition)
+        return self
+
+    def to_tsql(self) -> TSQL:
+        """Build the final TSQL object"""
+        parts: List[Template] = []
+
+        table_name = self.base_table.table_name
+        values_dict = self.values
+        parts.append(t'UPDATE {table_name:literal} SET {values_dict:as_set}')
+
+        if self._conditions:
+            where_parts = []
+            for cond in self._conditions:
+                if isinstance(cond, Template):
+                    where_parts.append(t'({cond})')
+                else:
+                    where_parts.append(cond.to_tsql())
+            combined_where = t_join(t' AND ', where_parts)
+            parts.append(t'WHERE {combined_where}')
+
+        parts.append(t'RETURNING *')
+
+        return TSQL(t_join(t' ', parts))
+
+    def render(self, style=None):
+        """Convenience method to render the query directly"""
+        return self.to_tsql().render(style)
+
+    def __repr__(self) -> str:
+        """Show the rendered SQL query for debugging"""
+        try:
+            query, params = self.to_tsql().render()
+            if params:
+                return f"UpdateBuilder(\n  SQL: {query}\n  Params: {params}\n)"
+            return f"UpdateBuilder({query})"
+        except Exception as e:
+            return f"UpdateBuilder(<error rendering: {e}>)"
+
+
+class DeleteBuilder:
+    """Fluent interface for building DELETE queries"""
+
+    def __init__(self, base_table: 'Table'):
+        self.base_table = base_table
+        self._conditions: List[Union[Condition, Template]] = []
+
+    def where(self, condition: Union[Condition, Template]) -> 'DeleteBuilder':
+        """Add a WHERE condition (multiple calls are ANDed together)"""
+        self._conditions.append(condition)
+        return self
+
+    def to_tsql(self) -> TSQL:
+        """Build the final TSQL object"""
+        parts: List[Template] = []
+
+        table_name = self.base_table.table_name
+        parts.append(t'DELETE FROM {table_name:literal}')
+
+        if self._conditions:
+            where_parts = []
+            for cond in self._conditions:
+                if isinstance(cond, Template):
+                    where_parts.append(t'({cond})')
+                else:
+                    where_parts.append(cond.to_tsql())
+            combined_where = t_join(t' AND ', where_parts)
+            parts.append(t'WHERE {combined_where}')
+
+        parts.append(t'RETURNING *')
+
+        return TSQL(t_join(t' ', parts))
+
+    def render(self, style=None):
+        """Convenience method to render the query directly"""
+        return self.to_tsql().render(style)
+
+    def __repr__(self) -> str:
+        """Show the rendered SQL query for debugging"""
+        try:
+            query, params = self.to_tsql().render()
+            if params:
+                return f"DeleteBuilder(\n  SQL: {query}\n  Params: {params}\n)"
+            return f"DeleteBuilder({query})"
+        except Exception as e:
+            return f"DeleteBuilder(<error rendering: {e}>)"
 
 
 class QueryBuilder:
@@ -374,7 +472,60 @@ def table(name: str, *, metadata: Optional[Any] = None, schema: Optional[str] = 
                 builder.select(*columns)
             return builder
 
+        def insert(self, values: dict[str, Any], ignore_conflict: bool = False) -> TSQL:
+            """Insert a row into the table
+
+            Args:
+                values: Dictionary of column names and values
+                ignore_conflict: If True, adds ON CONFLICT DO NOTHING
+
+            Returns:
+                TSQL object representing the INSERT query
+            """
+            return tsql_insert(self.table_name, values, ignore_conflict=ignore_conflict)
+
+        def upsert(self, values: dict[str, Any], conflict_on: str | list[str] | Column | list[Column]) -> TSQL:
+            """Upsert (INSERT ... ON CONFLICT DO UPDATE) a row
+
+            Args:
+                values: Dictionary of column names and values
+                conflict_on: Column name(s) or Column object(s) that define the conflict constraint
+
+            Returns:
+                TSQL object representing the UPSERT query
+            """
+            # Convert Column objects to strings
+            if isinstance(conflict_on, Column):
+                conflict_on = conflict_on.column_name
+            elif isinstance(conflict_on, list):
+                conflict_on = [col.column_name if isinstance(col, Column) else col for col in conflict_on]
+
+            return tsql_upsert(self.table_name, values, conflict_on=conflict_on)
+
+        def update(self, values: dict[str, Any]) -> UpdateBuilder:
+            """Start building an UPDATE query
+
+            Args:
+                values: Dictionary of column names and values to update
+
+            Returns:
+                UpdateBuilder for adding WHERE conditions
+            """
+            return UpdateBuilder(self, values)
+
+        def delete(self) -> DeleteBuilder:
+            """Start building a DELETE query
+
+            Returns:
+                DeleteBuilder for adding WHERE conditions
+            """
+            return DeleteBuilder(self)
+
         cls.select = select
+        cls.insert = insert
+        cls.upsert = upsert
+        cls.update = update
+        cls.delete = delete
 
         # Return an instance instead of the class
         return cls()

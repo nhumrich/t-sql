@@ -143,11 +143,29 @@ values = {'id': 'abc123', 'name': 'bob', 'email': 'bob@example.com'}
 tsql.insert(table, values)
 # INSERT INTO users (id, name, email) VALUES ('abc123', 'bob', 'bob@example.com')
 
+# insert with ignore_conflict
+tsql.insert(table, values, ignore_conflict=True)
+# INSERT INTO users (id, name, email) VALUES ('abc123', 'bob', 'bob@example.com') ON CONFLICT DO NOTHING RETURNING *
+
+# upsert (insert or update on conflict)
+values = {'id': 'abc123', 'name': 'joe', 'email': 'joe@example.com'}
+tsql.upsert(table, values, conflict_on='id')
+# INSERT INTO users (id, name, email) VALUES ('abc123', 'joe', 'joe@example.com')
+# ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email RETURNING *
+
+# upsert with multiple conflict columns
+tsql.upsert(table, values, conflict_on=['email', 'name'])
+# ON CONFLICT (email, name) DO UPDATE SET ...
+
 # update values on a single row
 table = 'users'
 values = {'name': 'joe', 'email': 'joe@example.com'}
 tsql.update(table, values, id='abc123')
-# UPDATE users SET name='joe', email='joe@example.com' WHERE id='abc123'
+# UPDATE users SET name='joe', email='joe@example.com' WHERE id='abc123' RETURNING *
+
+# delete a single row
+tsql.delete(table, id='abc123')
+# DELETE FROM users WHERE id = 'abc123'
 ```
 
 # Query Builder
@@ -239,6 +257,54 @@ query = (Posts.select(Posts.title, Users.username)
          .order_by((Posts.id, 'DESC'))
          .limit(20))
 ```
+
+## Write Operations
+
+The query builder supports INSERT, UPDATE, UPSERT, and DELETE operations:
+
+```python
+# INSERT
+values = {'id': 'abc123', 'username': 'john', 'email': 'john@example.com'}
+query = Users.insert(values)
+sql, params = query.render()
+# INSERT INTO users (id, username, email) VALUES (?, ?, ?) RETURNING *
+
+# INSERT with conflict handling (ignore)
+query = Users.insert(values, ignore_conflict=True)
+sql, params = query.render()
+# INSERT INTO users (id, username, email) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING *
+
+# UPSERT (INSERT ... ON CONFLICT DO UPDATE)
+values = {'id': 'abc123', 'username': 'john_updated', 'email': 'john@example.com'}
+query = Users.upsert(values, conflict_on='id')
+sql, params = query.render()
+# INSERT INTO users (id, username, email) VALUES (?, ?, ?)
+# ON CONFLICT (id) DO UPDATE SET username=EXCLUDED.username, email=EXCLUDED.email RETURNING *
+
+# UPSERT with multiple conflict columns
+query = Users.upsert(values, conflict_on=['email', 'username'])
+# Can also use Column objects: conflict_on=Users.id or conflict_on=[Users.email, Users.username]
+
+# UPDATE with WHERE conditions
+query = Users.update({'email': 'newemail@example.com'}).where(Users.id == 'abc123')
+sql, params = query.render()
+# UPDATE users SET email=? WHERE users.id = ? RETURNING *
+
+# UPDATE with multiple conditions
+query = (Users.update({'email': 'newemail@example.com'})
+         .where(Users.id == 'abc123')
+         .where(Users.username == 'john'))
+
+# DELETE with WHERE conditions
+query = Users.delete().where(Users.id == 'abc123')
+sql, params = query.render()
+# DELETE FROM users WHERE users.id = ? RETURNING *
+
+# DELETE with multiple conditions
+query = Users.delete().where(Users.id > 100).where(Users.email == None)
+```
+
+All write operations return `RETURNING *` by default to retrieve the affected rows.
 
 ## Advanced Mixed Query (Query Builder + T-Strings)
 

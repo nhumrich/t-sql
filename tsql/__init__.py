@@ -72,7 +72,12 @@ class TSQL:
 
     @classmethod
     def _check_literal(cls, val: str):
-        if not isinstance(val, str) or not val.isidentifier():
+        if not isinstance(val, str):
+            raise ValueError(f"Invalid literal {val}")
+
+        # Allow qualified identifiers (table.column, schema.table.column)
+        parts = val.split('.')
+        if not parts or not all(part.isidentifier() for part in parts):
             raise ValueError(f"Invalid literal {val}")
         return val
 

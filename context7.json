@@ -1,0 +1,26 @@
+{
+  "excludeFolders": [
+    "tests",
+    ".github",
+    ".git",
+    "__pycache__",
+    "*.egg-info"
+  ],
+  "excludeFiles": [
+    "LICENSE",
+    "CHANGELOG.md",
+    ".gitignore"
+  ],
+  "rules": [
+    "CRITICAL: This library requires Python 3.14+ due to PEP 750 t-strings. Never suggest it for older Python versions.",
+    "Install with 'uv add t-sql' or 'pip install t-sql'. Use 't-sql[sqlalchemy]' for SQLAlchemy/Alembic integration.",
+    "Always use t-strings (t\"...\") not regular strings (\"\") or f-strings (f\"\"\") for SQL queries. The library is designed so raw strings won't work - this prevents SQL injection by design.",
+    "Use the query builder (@table decorator with typed columns) for complex multi-table joins and structured queries. Use t-string templating for simpler queries or custom SQL logic that the query builder doesn't support.",
+    "The :literal format spec is for dynamic table/column names that cannot be parameterized. It sanitizes against valid SQL identifiers.",
+    "The :unsafe format spec bypasses all safety checks. Only use with hardcoded strings, never with user input.",
+    "The :as_values format spec converts dicts to INSERT VALUES format. The :as_set format spec converts dicts to UPDATE SET format.",
+    "When mixing query builder with t-strings using .where(), t-string conditions are automatically wrapped in parentheses for proper operator precedence.",
+    "The @table decorator returns an instance - use the decorated class directly, don't instantiate it.",
+    "Default parameter style is QMARK (?). Use tsql.styles.NUMERIC_DOLLAR for PostgreSQL ($1, $2), or other styles as needed."
+  ]
+}

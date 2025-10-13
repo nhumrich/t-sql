@@ -3,12 +3,13 @@ Proof-of-concept test demonstrating that tsql actually prevents SQL injection at
 against a real PostgreSQL database.
 """
 import asyncpg
+import os
 import pytest
 
 import tsql
 import tsql.styles
 
-DATABASE_URL = "postgresql://postgres:password@localhost:5454/postgres"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5454/postgres")
 
 
 @pytest.fixture

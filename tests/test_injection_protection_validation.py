@@ -1,11 +1,12 @@
 import asyncpg
+import os
 import pytest
 
 import tsql
 import tsql.styles
 
 # Test configuration
-DATABASE_URL = "postgresql://postgres:password@localhost:5454/postgres"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5454/postgres")
 
 
 @pytest.fixture

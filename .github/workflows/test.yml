@@ -13,6 +13,21 @@ jobs:
       matrix:
         python-version: ["3.14"]
 
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
 
@@ -28,4 +43,6 @@ jobs:
       run: uv sync
 
     - name: Run tests
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5432/postgres
       run: uv run pytest -v

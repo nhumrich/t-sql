@@ -287,85 +287,85 @@ def test_schema_support():
 
 def test_schema_in_column_string():
     """Test that Column includes schema in string representation"""
-    class Accounts(Table, table_name='accounts', schema='ledger'):
+    class Accounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
     col = Accounts.id
-    assert str(col) == 'ledger.accounts.id'
-    assert col.schema == 'ledger'
+    assert str(col) == 'other.accounts.id'
+    assert col.schema == 'other'
 
 
 def test_schema_in_select():
     """Test that SELECT includes schema in table name"""
-    class Accounts(Table, table_name='accounts', schema='ledger'):
+    class Accounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
     query = Accounts.select(Accounts.id, Accounts.name)
     sql, params = query.render()
 
-    assert 'SELECT ledger.accounts.id, ledger.accounts.name' in sql
-    assert 'FROM ledger.accounts' in sql
+    assert 'SELECT other.accounts.id, other.accounts.name' in sql
+    assert 'FROM other.accounts' in sql
 
 
 def test_schema_in_insert():
     """Test that INSERT includes schema in table name"""
-    class Accounts(Table, table_name='accounts', schema='ledger'):
+    class Accounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
     query = Accounts.insert(id='1', name='Test Account')
     sql, params = query.render()
 
-    assert 'INSERT INTO ledger.accounts' in sql
+    assert 'INSERT INTO other.accounts' in sql
     assert params == ['1', 'Test Account']
 
 
 def test_schema_in_update():
     """Test that UPDATE includes schema in table name"""
-    class Accounts(Table, table_name='accounts', schema='ledger'):
+    class Accounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
     query = Accounts.update({'name': 'Updated Account'}).where(Accounts.id == '1')
     sql, params = query.render()
 
-    assert 'UPDATE ledger.accounts SET' in sql
-    assert 'WHERE ledger.accounts.id = ?' in sql
+    assert 'UPDATE other.accounts SET' in sql
+    assert 'WHERE other.accounts.id = ?' in sql
 
 
 def test_schema_in_delete():
     """Test that DELETE includes schema in table name"""
-    class Accounts(Table, table_name='accounts', schema='ledger'):
+    class Accounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
     query = Accounts.delete().where(Accounts.id == '1')
     sql, params = query.render()
 
-    assert 'DELETE FROM ledger.accounts' in sql
-    assert 'WHERE ledger.accounts.id = ?' in sql
+    assert 'DELETE FROM other.accounts' in sql
+    assert 'WHERE other.accounts.id = ?' in sql
 
 
 def test_schema_in_join():
     """Test that JOIN includes schema in table name"""
-    class LedgerAccounts(Table, table_name='accounts', schema='ledger'):
+    class OtherAccounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
-    class Transactions(Table, table_name='transactions', schema='ledger'):
+    class Transactions(Table, table_name='transactions', schema='other'):
         id: Column
         account_id: Column
         amount: Column
 
-    query = (Transactions.select(Transactions.id, LedgerAccounts.name)
-             .join(LedgerAccounts, Transactions.account_id == LedgerAccounts.id))
+    query = (Transactions.select(Transactions.id, OtherAccounts.name)
+             .join(OtherAccounts, Transactions.account_id == OtherAccounts.id))
     sql, params = query.render()
 
-    assert 'SELECT ledger.transactions.id, ledger.accounts.name' in sql
-    assert 'FROM ledger.transactions' in sql
-    assert 'INNER JOIN ledger.accounts ON ledger.transactions.account_id = ledger.accounts.id' in sql
+    assert 'SELECT other.transactions.id, other.accounts.name' in sql
+    assert 'FROM other.transactions' in sql
+    assert 'INNER JOIN other.accounts ON other.transactions.account_id = other.accounts.id' in sql
 
 
 def test_schema_mixed_with_no_schema():
@@ -388,15 +388,15 @@ def test_schema_mixed_with_no_schema():
 
 def test_schema_with_column_alias():
     """Test that schema works with column aliases"""
-    class Accounts(Table, table_name='accounts', schema='ledger'):
+    class Accounts(Table, table_name='accounts', schema='other'):
         id: Column
         name: Column
 
     query = Accounts.select(Accounts.id.as_('account_id'), Accounts.name.as_('account_name'))
     sql, params = query.render()
 
-    assert 'SELECT ledger.accounts.id AS account_id, ledger.accounts.name AS account_name' in sql
-    assert 'FROM ledger.accounts' in sql
+    assert 'SELECT other.accounts.id AS account_id, other.accounts.name AS account_name' in sql
+    assert 'FROM other.accounts' in sql
 
 
 def test_group_by():

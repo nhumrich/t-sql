@@ -253,14 +253,18 @@ class Table:
         return builder
 
     @classmethod
-    def insert(cls, values: dict[str, Any]) -> 'InsertBuilder':
+    def insert(cls, **values: Any) -> 'InsertBuilder':
         """Start building an INSERT query
 
         Args:
-            values: Dictionary of column names and values
+            **values: Column names and values as keyword arguments
 
         Returns:
             InsertBuilder for adding conflict handling and RETURNING
+
+        Example:
+            Users.insert(username='bob', email='bob@example.com')
+            Or with dict unpacking: Users.insert(**my_dict)
         """
         return InsertBuilder(cls, values)
 

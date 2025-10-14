@@ -47,15 +47,9 @@ def test_as_set():
 
 def test_insert():
     """Test the insert helper function"""
-    values = {
-        'name': 'Alice',
-        'age': 25,
-        'active': True
-    }
-    
-    query = tsql.insert('users', values)
+    query = tsql.insert('users', name='Alice', age=25, active=True)
     result = tsql.render(query)
-    
+
     assert "INSERT INTO users" in result[0]
     assert "name" in result[0] and "age" in result[0] and "active" in result[0]
     assert "VALUES" in result[0]

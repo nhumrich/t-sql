@@ -388,7 +388,7 @@ def test_where_with_tstring_complex():
 
 def test_table_insert():
     """Test table.insert() method"""
-    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'})
+    query = Users.insert(username='bob', email='bob@example.com')
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
@@ -400,7 +400,7 @@ def test_table_insert():
 
 def test_table_insert_with_returning():
     """Test table.insert() with RETURNING"""
-    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}).returning()
+    query = Users.insert(username='bob', email='bob@example.com').returning()
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
@@ -410,7 +410,7 @@ def test_table_insert_with_returning():
 
 def test_table_insert_ignore():
     """Test table.insert() with ignore (MySQL)"""
-    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}).ignore()
+    query = Users.insert(username='bob', email='bob@example.com').ignore()
     sql, params = query.render()
 
     assert 'INSERT IGNORE INTO users' in sql
@@ -419,7 +419,7 @@ def test_table_insert_ignore():
 
 def test_table_insert_on_conflict_do_nothing():
     """Test table.insert() with ON CONFLICT DO NOTHING (Postgres/SQLite)"""
-    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}).on_conflict_do_nothing()
+    query = Users.insert(username='bob', email='bob@example.com').on_conflict_do_nothing()
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
@@ -428,7 +428,7 @@ def test_table_insert_on_conflict_do_nothing():
 
 def test_table_insert_on_conflict_update():
     """Test table.insert() with ON CONFLICT UPDATE (Postgres/SQLite upsert)"""
-    query = Users.insert({'email': 'bob@example.com', 'username': 'bob'}).on_conflict_update(conflict_on='email')
+    query = Users.insert(email='bob@example.com', username='bob').on_conflict_update(conflict_on='email')
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
@@ -439,7 +439,7 @@ def test_table_insert_on_conflict_update():
 
 def test_table_insert_on_duplicate_key_update():
     """Test table.insert() with ON DUPLICATE KEY UPDATE (MySQL)"""
-    query = Users.insert({'email': 'bob@example.com', 'username': 'bob'}).on_duplicate_key_update()
+    query = Users.insert(email='bob@example.com', username='bob').on_duplicate_key_update()
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
@@ -451,7 +451,7 @@ def test_table_insert_on_duplicate_key_update():
 
 def test_table_insert_chained_with_returning():
     """Test chaining conflict handling with RETURNING"""
-    query = (Users.insert({'email': 'bob@example.com', 'username': 'bob'})
+    query = (Users.insert(email='bob@example.com', username='bob')
              .on_conflict_update(conflict_on='email')
              .returning('id', 'username'))
     sql, params = query.render()

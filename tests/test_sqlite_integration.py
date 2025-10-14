@@ -35,8 +35,7 @@ async def test_insert_with_returning(conn):
         name: str
         email: str
 
-    values = {'name': 'Alice', 'email': 'alice@example.com'}
-    query = TestUsers.insert(values).returning()
+    query = TestUsers.insert(name='Alice', email='alice@example.com').returning()
     sql, params = query.render()
 
     assert 'RETURNING *' in sql
@@ -57,16 +56,14 @@ async def test_on_conflict_do_nothing(conn):
         email: str
 
     # Insert first row
-    values1 = {'name': 'Alice', 'email': 'alice@example.com'}
-    query1 = TestUsers.insert(values1)
+    query1 = TestUsers.insert(name='Alice', email='alice@example.com')
     sql1, params1 = query1.render()
 
     await conn.execute(sql1, params1)
     await conn.commit()
 
     # Try to insert duplicate email with ON CONFLICT DO NOTHING
-    values2 = {'name': 'Bob', 'email': 'alice@example.com'}
-    query2 = TestUsers.insert(values2).on_conflict_do_nothing()
+    query2 = TestUsers.insert(name='Bob', email='alice@example.com').on_conflict_do_nothing()
     sql2, params2 = query2.render()
 
     assert 'ON CONFLICT DO NOTHING' in sql2
@@ -94,8 +91,7 @@ async def test_on_conflict_update(conn):
         age: int
 
     # Insert first row
-    values1 = {'name': 'Alice', 'email': 'alice@example.com', 'age': 30}
-    query1 = TestUsers.insert(values1).returning()
+    query1 = TestUsers.insert(name='Alice', email='alice@example.com', age=30).returning()
     sql1, params1 = query1.render()
 
     cursor = await conn.execute(sql1, params1)
@@ -103,8 +99,7 @@ async def test_on_conflict_update(conn):
     await conn.commit()
 
     # Insert with duplicate email, but update on conflict
-    values2 = {'name': 'Alice Updated', 'email': 'alice@example.com', 'age': 31}
-    query2 = TestUsers.insert(values2).on_conflict_update(conflict_on='email').returning()
+    query2 = TestUsers.insert(name='Alice Updated', email='alice@example.com', age=31).on_conflict_update(conflict_on='email').returning()
     sql2, params2 = query2.render()
 
     assert 'ON CONFLICT (email)' in sql2
@@ -267,8 +262,7 @@ async def test_escaped_style(conn):
 async def test_helper_functions(conn):
     """Test simple helper functions work with SQLite"""
     # Test insert
-    values = {'name': 'Bob', 'email': 'bob@example.com', 'age': 25}
-    query = tsql.insert('test_users', values)
+    query = tsql.insert('test_users', name='Bob', email='bob@example.com', age=25)
     sql, params = query.render()
 
     await conn.execute(sql, params)

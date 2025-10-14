@@ -85,16 +85,14 @@ async def test_insert_ignore(conn):
         email: str
 
     # Insert first row
-    values1 = {'name': 'Alice', 'email': 'alice@example.com'}
-    query1 = TestUsers.insert(values1)
+    query1 = TestUsers.insert(name='Alice', email='alice@example.com')
     sql1, params1 = query1.render(style=tsql.styles.FORMAT)
 
     await cursor.execute(sql1, params1)
     await connection.commit()
 
     # Try to insert duplicate email with INSERT IGNORE
-    values2 = {'name': 'Bob', 'email': 'alice@example.com'}
-    query2 = TestUsers.insert(values2).ignore()
+    query2 = TestUsers.insert(name='Bob', email='alice@example.com').ignore()
     sql2, params2 = query2.render(style=tsql.styles.FORMAT)
 
     assert 'INSERT IGNORE' in sql2
@@ -126,16 +124,14 @@ async def test_on_duplicate_key_update(conn):
         age: int
 
     # Insert first row
-    values1 = {'name': 'Alice', 'email': 'alice@example.com', 'age': 30}
-    query1 = TestUsers.insert(values1)
+    query1 = TestUsers.insert(name='Alice', email='alice@example.com', age=30)
     sql1, params1 = query1.render(style=tsql.styles.FORMAT)
 
     await cursor.execute(sql1, params1)
     await connection.commit()
 
     # Insert with duplicate email, but update on conflict
-    values2 = {'name': 'Alice Updated', 'email': 'alice@example.com', 'age': 31}
-    query2 = TestUsers.insert(values2).on_duplicate_key_update()
+    query2 = TestUsers.insert(name='Alice Updated', email='alice@example.com', age=31).on_duplicate_key_update()
     sql2, params2 = query2.render(style=tsql.styles.FORMAT)
 
     assert 'ON DUPLICATE KEY UPDATE' in sql2
@@ -250,8 +246,7 @@ async def test_helper_functions(conn):
     connection, cursor = conn
 
     # Test insert
-    values = {'name': 'Bob', 'email': 'bob@example.com', 'age': 25}
-    query = tsql.insert('test_users', values)
+    query = tsql.insert('test_users', name='Bob', email='bob@example.com', age=25)
     sql, params = query.render(style=tsql.styles.FORMAT)
 
     await cursor.execute(sql, params)

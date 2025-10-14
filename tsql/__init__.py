@@ -235,18 +235,22 @@ def select(table: str, ids: str | int | list[str | int] = None, *, columns: list
     return TSQL(t'SELECT {t_columns} FROM {table:literal}{where_clause}')
 
 
-def insert(table: str, values: dict[str, Any]) -> TSQL:
+def insert(table: str, **values: Any) -> TSQL:
     """Helper function to build basic INSERT queries
 
     Args:
         table: Table name
-        values: Dictionary of column names and values
+        **values: Column names and values as keyword arguments
 
     Returns:
         TSQL object representing the INSERT query
+
+    Example:
+        insert('users', id=1, name='Alice')
+        Or with dict unpacking: insert('users', **my_dict)
     """
-    if not isinstance(values, dict):
-        raise TypeError("values must be a dict")
+    if not values:
+        raise ValueError("insert requires at least one column value")
 
     return TSQL(t"INSERT INTO {table:literal} {values:as_values}")
 

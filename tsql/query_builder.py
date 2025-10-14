@@ -493,11 +493,19 @@ class InsertBuilder:
         # ON CONFLICT clauses (Postgres/SQLite)
         if self._on_conflict_action == 'nothing':
             if self._conflict_cols:
+                # Validate all conflict columns
+                for col in self._conflict_cols:
+                    if not isinstance(col, str) or not col.isidentifier():
+                        raise ValueError(f"Invalid conflict column name: {col!r}")
                 conflict_cols_str = ', '.join(self._conflict_cols)
                 parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO NOTHING')
             else:
                 parts.append(t'ON CONFLICT DO NOTHING')
         elif self._on_conflict_action == 'update':
+            # Validate all conflict columns
+            for col in self._conflict_cols:
+                if not isinstance(col, str) or not col.isidentifier():
+                    raise ValueError(f"Invalid conflict column name: {col!r}")
             conflict_cols_str = ', '.join(self._conflict_cols)
 
             # Build UPDATE SET clause
@@ -539,6 +547,11 @@ class InsertBuilder:
 
         # RETURNING clause
         if self._returning_cols is not None:
+            # Validate all returning columns (skip validation for '*')
+            if self._returning_cols != ['*']:
+                for col in self._returning_cols:
+                    if not isinstance(col, str) or not col.isidentifier():
+                        raise ValueError(f"Invalid RETURNING column name: {col!r}")
             returning_str = ', '.join(self._returning_cols)
             parts.append(t'RETURNING {returning_str:unsafe}')
 
@@ -625,6 +638,11 @@ class UpdateBuilder:
             parts.append(t'WHERE {combined_where}')
 
         if self._returning_cols is not None:
+            # Validate all returning columns (skip validation for '*')
+            if self._returning_cols != ['*']:
+                for col in self._returning_cols:
+                    if not isinstance(col, str) or not col.isidentifier():
+                        raise ValueError(f"Invalid RETURNING column name: {col!r}")
             returning_str = ', '.join(self._returning_cols)
             parts.append(t'RETURNING {returning_str:unsafe}')
 
@@ -688,6 +706,11 @@ class DeleteBuilder:
             parts.append(t'WHERE {combined_where}')
 
         if self._returning_cols is not None:
+            # Validate all returning columns (skip validation for '*')
+            if self._returning_cols != ['*']:
+                for col in self._returning_cols:
+                    if not isinstance(col, str) or not col.isidentifier():
+                        raise ValueError(f"Invalid RETURNING column name: {col!r}")
             returning_str = ', '.join(self._returning_cols)
             parts.append(t'RETURNING {returning_str:unsafe}')
 

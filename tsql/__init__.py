@@ -47,8 +47,6 @@ class TSQL:
         if style is None:
             style = default_style
         result = ''
-        if style is None:
-            style = default_style
 
         style_instance = style()
         iterator = iter(style_instance)

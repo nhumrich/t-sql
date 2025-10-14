@@ -1065,3 +1065,105 @@ def test_update_overrides_onupdate():
     assert 'UPDATE articles SET' in sql
     assert 'manual_timestamp' in params
     assert 'auto_timestamp' not in params
+
+
+def test_conflict_cols_validation():
+    """Test that conflict_cols are validated for SQL injection"""
+    import pytest
+
+    # Test with malicious conflict column
+    query = Users.insert(username='bob', email='bob@example.com')
+    builder = query.on_conflict_do_nothing(conflict_on="id); DROP TABLE users; --")
+
+    with pytest.raises(ValueError, match="Invalid conflict column name"):
+        builder.render()
+
+    # Test with valid conflict column (should work)
+    query2 = Users.insert(username='bob', email='bob@example.com')
+    builder2 = query2.on_conflict_do_nothing(conflict_on="id")
+    sql, params = builder2.render()
+
+    assert 'ON CONFLICT (id) DO NOTHING' in sql
+
+
+def test_returning_cols_validation_insert():
+    """Test that returning_cols in INSERT are validated"""
+    import pytest
+
+    # Test with malicious returning column
+    query = Users.insert(username='bob', email='bob@example.com')
+    builder = query.returning("id; DROP TABLE users CASCADE; --")
+
+    with pytest.raises(ValueError, match="Invalid RETURNING column name"):
+        builder.render()
+
+    # Test with valid returning columns (should work)
+    query2 = Users.insert(username='bob', email='bob@example.com')
+    builder2 = query2.returning("id", "username")
+    sql, params = builder2.render()
+
+    assert 'RETURNING id, username' in sql
+
+    # Test that RETURNING * works (special case)
+    query3 = Users.insert(username='bob', email='bob@example.com')
+    builder3 = query3.returning()  # Defaults to *
+    sql3, params3 = builder3.render()
+
+    assert 'RETURNING *' in sql3
+
+
+def test_returning_cols_validation_update():
+    """Test that returning_cols in UPDATE are validated"""
+    import pytest
+
+    # Test with malicious returning column
+    query = Users.update({'username': 'hacked'})
+    builder = query.returning("id, (SELECT password FROM admin_users LIMIT 1) AS stolen")
+
+    with pytest.raises(ValueError, match="Invalid RETURNING column name"):
+        builder.render()
+
+    # Test with valid returning columns (should work)
+    query2 = Users.update({'username': 'updated'})
+    builder2 = query2.where(Users.id == 5).returning("id", "username")
+    sql, params = builder2.render()
+
+    assert 'RETURNING id, username' in sql
+
+
+def test_returning_cols_validation_delete():
+    """Test that returning_cols in DELETE are validated"""
+    import pytest
+
+    # Test with malicious returning column
+    query = Users.delete()
+    builder = query.returning("* FROM users; DROP TABLE secrets; --")
+
+    with pytest.raises(ValueError, match="Invalid RETURNING column name"):
+        builder.render()
+
+    # Test with valid returning columns (should work)
+    query2 = Users.delete()
+    builder2 = query2.where(Users.id == 5).returning("id")
+    sql, params = builder2.render()
+
+    assert 'RETURNING id' in sql
+
+
+def test_conflict_cols_list_validation():
+    """Test that lists of conflict_cols are all validated"""
+    import pytest
+
+    # Test with one valid and one malicious column
+    query = Users.insert(username='bob', email='bob@example.com')
+    builder = query.on_conflict_update(conflict_on=["id", "email'); DROP TABLE users; --"])
+
+    with pytest.raises(ValueError, match="Invalid conflict column name"):
+        builder.render()
+
+    # Test with all valid columns (should work)
+    query2 = Users.insert(username='bob', email='bob@example.com')
+    builder2 = query2.on_conflict_update(conflict_on=["id", "email"])
+    sql, params = builder2.render()
+
+    assert 'ON CONFLICT (id, email)' in sql

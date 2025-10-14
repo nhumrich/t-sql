@@ -1,4 +1,8 @@
 {
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "t-sql",
+  "description": "t-sql is a lightweight SQL templating library for Python 3.14+ that leverages t-strings to safely build SQL queries, preventing injection attacks, and includes a query builder and SQLAlchemy integration.",
+  "branch": "main",
   "excludeFolders": [
     "tests",
     ".github",
@@ -22,5 +26,11 @@
     "When mixing query builder with t-strings using .where(), t-string conditions are automatically wrapped in parentheses for proper operator precedence.",
     "The @table decorator returns an instance - use the decorated class directly, don't instantiate it.",
     "Default parameter style is QMARK (?). Use tsql.styles.NUMERIC_DOLLAR for PostgreSQL ($1, $2), or other styles as needed."
+  ],
+  "previousVersions": [
+    {
+      "tag": "v1_2_1",
+      "title": "v1.2.1"
+    }
   ]
 }

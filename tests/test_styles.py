@@ -102,3 +102,27 @@ def test_escaped_style():
     assert val5 == 'FALSE'
     assert q.params == []
 
+
+def test_named_style_with_integer_values():
+    """Test that NAMED style uses parameter name (not value) for integers"""
+    from tsql import render
+    from string.templatelib import Template as t
+
+    age = 25
+    result = render(t'SELECT * FROM users WHERE age = {age}', style=NAMED)
+
+    assert result.sql == 'SELECT * FROM users WHERE age = :age'
+    assert result.values == [25]
+
+
+def test_pyformat_style_with_integer_values():
+    """Test that PYFORMAT style uses parameter name (not value) for integers"""
+    from tsql import render
+    from string.templatelib import Template as t
+
+    age = 25
+    result = render(t'SELECT * FROM users WHERE age = {age}', style=PYFORMAT)
+
+    assert result.sql == 'SELECT * FROM users WHERE age = %(age)s'
+    assert result.values == [25]
+

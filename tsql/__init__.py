@@ -121,7 +121,7 @@ class TSQL:
                 case _, bytes():
                     return [Parameter(val.expression, value)]
                 case _, int():
-                    return [Parameter(val.value, val.value)]
+                    return [Parameter(val.expression, val.value)]
                 case _, _:
                     return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
 

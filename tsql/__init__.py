@@ -122,9 +122,8 @@ class TSQL:
                     return [Parameter(val.expression, value)]
                 case _, int():
                     return [Parameter(val.value, val.value)]
-
-
-            return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
+                case _, _:
+                    return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
 
         if isinstance(val, Template):
             result = []
@@ -203,9 +202,19 @@ def render(query: Template|TSQL, style=None) -> RenderedQuery:
     return query.render(style=style)
 
 
-def select(table, ids:str|int|list[str|int]=None, *, columns=None):
-    """Helper function to build basic SELECT queries"""
+# Simple helper functions (database-agnostic)
 
+def select(table: str, ids: str | int | list[str | int] = None, *, columns: list[str] = None) -> TSQL:
+    """Helper function to build basic SELECT queries
+
+    Args:
+        table: Table name
+        ids: Optional ID or list of IDs to filter by
+        columns: Optional list of column names to select (defaults to *)
+
+    Returns:
+        TSQL object representing the SELECT query
+    """
     if not columns:
         t_columns = t'*'
     else:
@@ -226,78 +235,40 @@ def select(table, ids:str|int|list[str|int]=None, *, columns=None):
     return TSQL(t'SELECT {t_columns} FROM {table:literal}{where_clause}')
 
 
-def insert(table: str, values: dict[str, Any], ignore_conflict=False):
-    """Helper function to build INSERT queries"""
-
-    if not isinstance(values, dict):
-        raise TypeError("values must be a dict")
-
-    conflict_clause = t""
-    if ignore_conflict:
-        conflict_clause = t" ON CONFLICT DO NOTHING"
-
-    return TSQL(t"INSERT INTO {table:literal} {values:as_values}{conflict_clause} RETURNING *")
-
-
-def update(table: str, values: dict[str, Any], id: str):
-    """Helper function to build UPDATE queries for a single row"""
-
-    if not isinstance(values, dict):
-        raise ValueError("values must be a dictionary")
-
-    return TSQL(t"UPDATE {table:literal} SET {values:as_set} WHERE id = {id} RETURNING *")
-
-
-def upsert(table: str, values: dict[str, Any], conflict_on: str | list[str]):
-    """Helper function to build INSERT ... ON CONFLICT DO UPDATE (upsert) queries
+def insert(table: str, values: dict[str, Any]) -> TSQL:
+    """Helper function to build basic INSERT queries
 
     Args:
         table: Table name
-        values: Dictionary of column names and values to insert
-        conflict_on: Column name(s) that define the conflict constraint
+        values: Dictionary of column names and values
 
     Returns:
-        TSQL object representing the upsert query
+        TSQL object representing the INSERT query
     """
     if not isinstance(values, dict):
         raise TypeError("values must be a dict")
 
-    # Normalize conflict_on to a list
-    conflict_cols = [conflict_on] if isinstance(conflict_on, str) else conflict_on
-
-    # Build the conflict target: ON CONFLICT (col1, col2)
-    conflict_target_parts = ['(']
-    for i, col in enumerate(conflict_cols):
-        if i > 0:
-            conflict_target_parts.append(', ')
-        conflict_target_parts.append(col)
-    conflict_target_parts.append(')')
-
-    # Build the UPDATE SET clause with EXCLUDED.* for non-conflict columns
-    update_cols = {k: v for k, v in values.items() if k not in conflict_cols}
-
-    if not update_cols:
-        # If all columns are conflict columns, just do nothing
-        conflict_clause_parts = [' ON CONFLICT '] + conflict_target_parts + [' DO NOTHING']
-    else:
-        update_set_parts = []
-        for i, key in enumerate(update_cols.keys()):
-            if i > 0:
-                update_set_parts.append(', ')
-            update_set_parts.append(key)
-            update_set_parts.append(' = EXCLUDED.')
-            update_set_parts.append(key)
-
-        conflict_clause_parts = [' ON CONFLICT '] + conflict_target_parts + [' DO UPDATE SET '] + update_set_parts
-
-    # Create the conflict clause TSQL object
-    conflict_tsql = TSQL.__new__(TSQL)
-    conflict_tsql._sql_parts = conflict_clause_parts
-
-    return TSQL(t"INSERT INTO {table:literal} {values:as_values}{conflict_tsql} RETURNING *")
+    return TSQL(t"INSERT INTO {table:literal} {values:as_values}")
 
 
-def delete(table: str, id: str|int):
+def update(table: str, values: dict[str, Any], id: str | int) -> TSQL:
+    """Helper function to build UPDATE queries for a single row
+
+    Args:
+        table: Table name
+        values: Dictionary of column names and values to update
+        id: ID value to update
+
+    Returns:
+        TSQL object representing the UPDATE query
+    """
+    if not isinstance(values, dict):
+        raise ValueError("values must be a dictionary")
+
+    return TSQL(t"UPDATE {table:literal} SET {values:as_set} WHERE id = {id}")
+
+
+def delete(table: str, id: str | int) -> TSQL:
     """Helper function to build DELETE queries for a single row
 
     Args:
@@ -308,4 +279,16 @@ def delete(table: str, id: str|int):
         TSQL object representing the DELETE query
     """
     return TSQL(t"DELETE FROM {table:literal} WHERE id = {id}")
+
+
+__all__ = [
+    'TSQL',
+    'render',
+    't_join',
+    'select',
+    'insert',
+    'update',
+    'delete',
+    'set_style',
+]
 

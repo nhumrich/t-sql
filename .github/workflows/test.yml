@@ -28,6 +28,21 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: testdb
+          MYSQL_USER: testuser
+          MYSQL_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -u root -ppassword"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
 
@@ -45,4 +60,9 @@ jobs:
     - name: Run tests
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/postgres
+        MYSQL_HOST: localhost
+        MYSQL_PORT: 3306
+        MYSQL_USER: testuser
+        MYSQL_PASSWORD: password
+        MYSQL_DB: testdb
       run: uv run pytest -v

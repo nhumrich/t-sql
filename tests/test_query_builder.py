@@ -1,29 +1,26 @@
 import tsql
-from tsql.query_builder import table, Column, Condition, UpdateBuilder, DeleteBuilder
+from tsql.query_builder import Table, Column, Condition, InsertBuilder, UpdateBuilder, DeleteBuilder
 
 
-@table('users')
-class Users:
-    id: int
-    username: str
-    email: str
-    created_at: str
+class Users(Table):
+    id: Column
+    username: Column
+    email: Column
+    created_at: Column
 
 
-@table('posts')
-class Posts:
-    id: int
-    user_id: int
-    title: str
-    body: str
+class Posts(Table):
+    id: Column
+    user_id: Column
+    title: Column
+    body: Column
 
 
-@table('comments')
-class Comments:
-    id: int
-    post_id: int
-    user_id: int
-    content: str
+class Comments(Table):
+    id: Column
+    post_id: Column
+    user_id: Column
+    content: Column
 
 
 def test_table_creation():
@@ -281,9 +278,8 @@ def test_render_with_style():
 
 def test_schema_support():
     """Test that schema parameter works"""
-    @table('users', schema='public')
-    class SchemaUsers:
-        id: int
+    class SchemaUsers(Table, table_name='users', schema='public'):
+        id: Column
 
     assert SchemaUsers.table_name == 'users'
     assert SchemaUsers.schema == 'public'
@@ -398,57 +394,72 @@ def test_table_insert():
     assert 'INSERT INTO users' in sql
     assert 'username' in sql and 'email' in sql
     assert 'VALUES' in sql
+    assert 'RETURNING' not in sql  # No RETURNING by default
+    assert params == ['bob', 'bob@example.com']
+
+
+def test_table_insert_with_returning():
+    """Test table.insert() with RETURNING"""
+    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}).returning()
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
     assert 'RETURNING *' in sql
     assert params == ['bob', 'bob@example.com']
 
 
-def test_table_insert_ignore_conflict():
-    """Test table.insert() with ignore_conflict"""
-    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}, ignore_conflict=True)
+def test_table_insert_ignore():
+    """Test table.insert() with ignore (MySQL)"""
+    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}).ignore()
+    sql, params = query.render()
+
+    assert 'INSERT IGNORE INTO users' in sql
+    assert params == ['bob', 'bob@example.com']
+
+
+def test_table_insert_on_conflict_do_nothing():
+    """Test table.insert() with ON CONFLICT DO NOTHING (Postgres/SQLite)"""
+    query = Users.insert({'username': 'bob', 'email': 'bob@example.com'}).on_conflict_do_nothing()
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
     assert 'ON CONFLICT DO NOTHING' in sql
-    assert 'RETURNING *' in sql
 
 
-def test_table_upsert():
-    """Test table.upsert() method"""
-    query = Users.upsert({'email': 'bob@example.com', 'username': 'bob'}, conflict_on='email')
+def test_table_insert_on_conflict_update():
+    """Test table.insert() with ON CONFLICT UPDATE (Postgres/SQLite upsert)"""
+    query = Users.insert({'email': 'bob@example.com', 'username': 'bob'}).on_conflict_update(conflict_on='email')
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
     assert 'ON CONFLICT (email)' in sql
     assert 'DO UPDATE SET' in sql
     assert 'username = EXCLUDED.username' in sql
-    assert 'RETURNING *' in sql
 
 
-def test_table_upsert_with_column_object():
-    """Test table.upsert() with Column object"""
-    query = Users.upsert({'email': 'bob@example.com', 'username': 'bob'}, conflict_on=Users.email)
+def test_table_insert_on_duplicate_key_update():
+    """Test table.insert() with ON DUPLICATE KEY UPDATE (MySQL)"""
+    query = Users.insert({'email': 'bob@example.com', 'username': 'bob'}).on_duplicate_key_update()
+    sql, params = query.render()
+
+    assert 'INSERT INTO users' in sql
+    assert 'AS new' in sql
+    assert 'ON DUPLICATE KEY UPDATE' in sql
+    assert 'email = new.email' in sql
+    assert 'username = new.username' in sql
+
+
+def test_table_insert_chained_with_returning():
+    """Test chaining conflict handling with RETURNING"""
+    query = (Users.insert({'email': 'bob@example.com', 'username': 'bob'})
+             .on_conflict_update(conflict_on='email')
+             .returning('id', 'username'))
     sql, params = query.render()
 
     assert 'INSERT INTO users' in sql
     assert 'ON CONFLICT (email)' in sql
     assert 'DO UPDATE SET' in sql
-    assert 'username = EXCLUDED.username' in sql
-    assert 'RETURNING *' in sql
-
-
-def test_table_upsert_with_multiple_column_objects():
-    """Test table.upsert() with multiple Column objects"""
-    query = Users.upsert(
-        {'email': 'bob@example.com', 'username': 'bob', 'created_at': '2024-01-01'},
-        conflict_on=[Users.email, Users.username]
-    )
-    sql, params = query.render()
-
-    assert 'INSERT INTO users' in sql
-    assert 'ON CONFLICT (email, username)' in sql
-    assert 'DO UPDATE SET' in sql
-    assert 'created_at = EXCLUDED.created_at' in sql
-    assert 'RETURNING *' in sql
+    assert 'RETURNING id, username' in sql
 
 
 def test_table_update_with_where():
@@ -461,7 +472,7 @@ def test_table_update_with_where():
     assert 'UPDATE users SET' in sql
     assert 'username = ?' in sql
     assert 'WHERE users.id = ?' in sql
-    assert 'RETURNING *' in sql
+    assert 'RETURNING' not in sql  # No RETURNING by default
     assert params == ['bob_updated', 5]
 
 
@@ -476,8 +487,19 @@ def test_table_update_multiple_conditions():
     assert 'UPDATE users SET' in sql
     assert 'WHERE users.id > ?' in sql
     assert 'AND users.created_at IS NULL' in sql
-    assert 'RETURNING *' in sql
+    assert 'RETURNING' not in sql  # No RETURNING by default
     assert params == ['bob_updated', 'new@example.com', 10]
+
+
+def test_table_update_with_returning():
+    """Test table.update() with RETURNING"""
+    builder = Users.update({'username': 'bob_updated'}).where(Users.id == 5).returning()
+    sql, params = builder.render()
+
+    assert 'UPDATE users SET' in sql
+    assert 'WHERE users.id = ?' in sql
+    assert 'RETURNING *' in sql
+    assert params == ['bob_updated', 5]
 
 
 def test_table_delete_with_where():
@@ -489,7 +511,7 @@ def test_table_delete_with_where():
 
     assert 'DELETE FROM users' in sql
     assert 'WHERE users.id = ?' in sql
-    assert 'RETURNING *' in sql
+    assert 'RETURNING' not in sql  # No RETURNING by default
     assert params == [5]
 
 
@@ -504,8 +526,19 @@ def test_table_delete_multiple_conditions():
     assert 'DELETE FROM users' in sql
     assert 'WHERE users.id > ?' in sql
     assert 'AND users.email IS NULL' in sql
-    assert 'RETURNING *' in sql
+    assert 'RETURNING' not in sql  # No RETURNING by default
     assert params == [100]
+
+
+def test_table_delete_with_returning():
+    """Test table.delete() with RETURNING"""
+    builder = Users.delete().where(Users.id == 5).returning()
+    sql, params = builder.render()
+
+    assert 'DELETE FROM users' in sql
+    assert 'WHERE users.id = ?' in sql
+    assert 'RETURNING *' in sql
+    assert params == [5]
 
 
 def test_update_with_t_string_where():
@@ -530,3 +563,283 @@ def test_delete_with_t_string_where():
     assert 'DELETE FROM users' in sql
     assert 'WHERE (email LIKE ?)' in sql
     assert params == ['%test%']
+
+
+def test_column_as_method():
+    """Test using Column.as_() method for aliases"""
+    query = Users.select(
+        Users.id,
+        Users.username.as_('user'),
+        Users.email.as_('contact_email')
+    )
+
+    sql, params = query.render()
+
+    assert "SELECT users.id, users.username AS user, users.email AS contact_email" in sql
+    assert "FROM users" in sql
+    assert params == []
+
+
+def test_column_as_with_where():
+    """Test that aliased columns work with WHERE clauses"""
+    query = Users.select(
+        Users.id,
+        Users.username.as_('user')
+    ).where(Users.email == 'test@example.com')
+
+    sql, params = query.render()
+
+    assert "SELECT users.id, users.username AS user" in sql
+    assert "WHERE users.email = ?" in sql
+    assert params == ['test@example.com']
+
+
+def test_tstring_alias():
+    """Test using raw t-string for column aliases"""
+    query = Users.select(
+        Users.id,
+        Users.email,
+        t'users.username AS user'
+    )
+
+    sql, params = query.render()
+
+    assert "SELECT users.id, users.email, users.username AS user" in sql
+    assert "FROM users" in sql
+    assert params == []
+
+
+def test_mixed_columns_and_tstrings():
+    """Test mixing Column objects, aliased Columns, and raw t-strings"""
+    query = Users.select(
+        Users.id,
+        Users.username.as_('user'),
+        Users.email,
+        t'users.created_at AS created'
+    )
+
+    sql, params = query.render()
+
+    assert "SELECT users.id, users.username AS user, users.email, users.created_at AS created" in sql
+    assert "FROM users" in sql
+    assert params == []
+
+
+def test_column_without_alias_unchanged():
+    """Test that columns without aliases remain unchanged"""
+    col1 = Users.username
+    aliased_col = Users.username.as_('user')
+
+    # Original column should not have alias
+    assert str(col1) == "users.username"
+    assert str(aliased_col) == "users.username AS user"
+
+    # Using the original column again should still not have alias
+    query = Users.select(col1)
+    sql, params = query.render()
+    assert "SELECT users.username FROM users" in sql
+
+
+def test_multiple_queries_with_same_column():
+    """Test that aliasing in one query doesn't affect another query"""
+    # First query with alias
+    query1 = Users.select(Users.username.as_('user'))
+    sql1, _ = query1.render()
+    assert "username AS user" in sql1
+
+    # Second query without alias
+    query2 = Users.select(Users.username)
+    sql2, _ = query2.render()
+    assert "username AS user" not in sql2
+    assert "SELECT users.username FROM users" in sql2
+
+
+def test_tstring_with_params_in_select():
+    """Test that t-strings with parameters work in select"""
+    separator = ' - '
+    query = Users.select(
+        Users.id,
+        t'CONCAT(users.username, {separator}, users.email) AS full_info'
+    ).where(Users.id > 5)
+
+    sql, params = query.render()
+
+    assert 'CONCAT(users.username, ?, users.email) AS full_info' in sql
+    assert 'WHERE users.id > ?' in sql
+    assert params == [' - ', 5]
+
+
+def test_column_is_null_property():
+    """Test is_null property"""
+    condition = Users.email.is_null
+    assert condition.operator == 'IS'
+    assert condition.right is None
+
+
+def test_column_is_not_null_property():
+    """Test is_not_null property"""
+    condition = Users.email.is_not_null
+    assert condition.operator == 'IS NOT'
+    assert condition.right is None
+
+
+def test_where_with_is_null():
+    """Test WHERE with is_null"""
+    query = Users.select().where(Users.email.is_null)
+    sql, params = query.render()
+
+    assert 'WHERE users.email IS NULL' in sql
+    assert params == []
+
+
+def test_where_with_is_not_null():
+    """Test WHERE with is_not_null"""
+    query = Users.select().where(Users.email.is_not_null)
+    sql, params = query.render()
+
+    assert 'WHERE users.email IS NOT NULL' in sql
+    assert params == []
+
+
+def test_column_not_in():
+    """Test NOT IN operator"""
+    condition = Users.id.not_in([1, 2, 3])
+    assert condition.operator == 'NOT IN'
+    assert condition.right == (1, 2, 3)
+
+
+def test_where_with_not_in():
+    """Test WHERE with NOT IN clause"""
+    query = Users.select().where(Users.id.not_in([1, 2, 3]))
+    sql, params = query.render()
+
+    assert 'WHERE users.id NOT IN' in sql
+    assert '?' in sql
+    assert params == [1, 2, 3]
+
+
+def test_column_between():
+    """Test BETWEEN operator"""
+    condition = Users.id.between(10, 50)
+    assert condition.operator == 'BETWEEN'
+    assert condition.right == (10, 50)
+
+
+def test_where_with_between():
+    """Test WHERE with BETWEEN clause"""
+    query = Users.select().where(Users.id.between(10, 50))
+    sql, params = query.render()
+
+    assert 'WHERE users.id BETWEEN ? AND ?' in sql
+    assert params == [10, 50]
+
+
+def test_column_not_between():
+    """Test NOT BETWEEN operator"""
+    condition = Users.id.not_between(10, 50)
+    assert condition.operator == 'NOT BETWEEN'
+    assert condition.right == (10, 50)
+
+
+def test_where_with_not_between():
+    """Test WHERE with NOT BETWEEN clause"""
+    query = Users.select().where(Users.id.not_between(10, 50))
+    sql, params = query.render()
+
+    assert 'WHERE users.id NOT BETWEEN ? AND ?' in sql
+    assert params == [10, 50]
+
+
+def test_column_not_like():
+    """Test NOT LIKE operator"""
+    condition = Users.username.not_like('%john%')
+    assert condition.operator == 'NOT LIKE'
+    assert condition.right == '%john%'
+
+
+def test_where_with_not_like():
+    """Test WHERE with NOT LIKE clause"""
+    query = Users.select().where(Users.username.not_like('%john%'))
+    sql, params = query.render()
+
+    assert 'WHERE users.username NOT LIKE ?' in sql
+    assert params == ['%john%']
+
+
+def test_column_ilike():
+    """Test ILIKE operator (case-insensitive)"""
+    condition = Users.username.ilike('%JOHN%')
+    assert condition.operator == 'ILIKE'
+    assert condition.right == '%JOHN%'
+
+
+def test_where_with_ilike():
+    """Test WHERE with ILIKE clause"""
+    query = Users.select().where(Users.username.ilike('%JOHN%'))
+    sql, params = query.render()
+
+    assert 'WHERE users.username ILIKE ?' in sql
+    assert params == ['%JOHN%']
+
+
+def test_column_not_ilike():
+    """Test NOT ILIKE operator"""
+    condition = Users.username.not_ilike('%JOHN%')
+    assert condition.operator == 'NOT ILIKE'
+    assert condition.right == '%JOHN%'
+
+
+def test_where_with_not_ilike():
+    """Test WHERE with NOT ILIKE clause"""
+    query = Users.select().where(Users.username.not_ilike('%JOHN%'))
+    sql, params = query.render()
+
+    assert 'WHERE users.username NOT ILIKE ?' in sql
+    assert params == ['%JOHN%']
+
+
+def test_in_with_subquery():
+    """Test IN with a subquery (QueryBuilder)"""
+    subquery = Users.select(Users.id).where(Users.username.like('%admin%'))
+    query = Posts.select().where(Posts.user_id.in_(subquery))
+    sql, params = query.render()
+
+    assert 'WHERE posts.user_id IN (SELECT' in sql
+    assert 'users.username LIKE ?' in sql
+    assert params == ['%admin%']
+
+
+def test_not_in_with_subquery():
+    """Test NOT IN with a subquery (QueryBuilder)"""
+    subquery = Users.select(Users.id).where(Users.username.like('%banned%'))
+    query = Posts.select().where(Posts.user_id.not_in(subquery))
+    sql, params = query.render()
+
+    assert 'WHERE posts.user_id NOT IN (SELECT' in sql
+    assert 'users.username LIKE ?' in sql
+    assert params == ['%banned%']
+
+
+def test_in_with_tstring():
+    """Test IN with a raw t-string"""
+    query = Users.select().where(Users.id.in_(t'(SELECT user_id FROM admins)'))
+    sql, params = query.render()
+
+    assert 'WHERE users.id IN (SELECT user_id FROM admins)' in sql
+    assert params == []
+
+
+def test_complex_query_with_new_operators():
+    """Test complex query using multiple new operators"""
+    query = (Users.select()
+             .where(Users.id.between(1, 100))
+             .where(Users.email.is_not_null)
+             .where(Users.id.not_in([5, 10, 15]))
+             .where(Users.username.ilike('%test%')))
+    sql, params = query.render()
+
+    assert 'WHERE users.id BETWEEN ? AND ?' in sql
+    assert 'AND users.email IS NOT NULL' in sql
+    assert 'AND users.id NOT IN' in sql
+    assert 'AND users.username ILIKE ?' in sql
+    assert params == [1, 100, 5, 10, 15, '%test%']

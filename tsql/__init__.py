@@ -77,6 +77,10 @@ class TSQL:
 
         # Allow qualified identifiers (table.column, schema.table.column)
         parts = val.split('.')
+
+        if len(parts) > 3:
+            raise ValueError(f"Invalid literal {val}: too many parts (max 3 for schema.table.column)")
+
         if not parts or not all(part.isidentifier() for part in parts):
             raise ValueError(f"Invalid literal {val}")
         return val

@@ -272,3 +272,42 @@ def test_valid_dictionary_keys_still_work():
     assert "first_name = ?" in result2[0]
     assert "last_name = ?" in result2[0]
     assert result2[1] == ["Bob", "Smith"]
+
+
+def test_literal_too_many_parts():
+    """Test that literals with more than 3 parts are rejected"""
+    # 4 parts should be rejected
+    four_part_literal = "a.b.c.d"
+    with pytest.raises(ValueError, match="too many parts"):
+        tsql.render(t"SELECT * FROM {four_part_literal:literal}")
+
+    # 5 parts should be rejected
+    five_part_literal = "a.b.c.d.e"
+    with pytest.raises(ValueError, match="too many parts"):
+        tsql.render(t"SELECT * FROM {five_part_literal:literal}")
+
+    # Many parts should be rejected
+    many_parts_literal = ".".join(["a"] * 10)
+    with pytest.raises(ValueError, match="too many parts"):
+        tsql.render(t"SELECT * FROM {many_parts_literal:literal}")
+
+
+def test_literal_valid_parts():
+    """Test that literals with 1-3 parts are accepted"""
+    # 1 part (simple table name)
+    one_part = "users"
+    result = tsql.render(t"SELECT * FROM {one_part:literal}")
+    assert result[0] == "SELECT * FROM users"
+    assert result[1] == []
+
+    # 2 parts (schema.table)
+    two_parts = "public.users"
+    result = tsql.render(t"SELECT * FROM {two_parts:literal}")
+    assert result[0] == "SELECT * FROM public.users"
+    assert result[1] == []
+
+    # 3 parts (database.schema.table or schema.table.column)
+    three_parts = "mydb.public.users"
+    result = tsql.render(t"SELECT * FROM {three_parts:literal}")
+    assert result[0] == "SELECT * FROM mydb.public.users"
+    assert result[1] == []

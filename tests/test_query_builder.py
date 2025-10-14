@@ -285,6 +285,120 @@ def test_schema_support():
     assert SchemaUsers.schema == 'public'
 
 
+def test_schema_in_column_string():
+    """Test that Column includes schema in string representation"""
+    class Accounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    col = Accounts.id
+    assert str(col) == 'ledger.accounts.id'
+    assert col.schema == 'ledger'
+
+
+def test_schema_in_select():
+    """Test that SELECT includes schema in table name"""
+    class Accounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    query = Accounts.select(Accounts.id, Accounts.name)
+    sql, params = query.render()
+
+    assert 'SELECT ledger.accounts.id, ledger.accounts.name' in sql
+    assert 'FROM ledger.accounts' in sql
+
+
+def test_schema_in_insert():
+    """Test that INSERT includes schema in table name"""
+    class Accounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    query = Accounts.insert(id='1', name='Test Account')
+    sql, params = query.render()
+
+    assert 'INSERT INTO ledger.accounts' in sql
+    assert params == ['1', 'Test Account']
+
+
+def test_schema_in_update():
+    """Test that UPDATE includes schema in table name"""
+    class Accounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    query = Accounts.update({'name': 'Updated Account'}).where(Accounts.id == '1')
+    sql, params = query.render()
+
+    assert 'UPDATE ledger.accounts SET' in sql
+    assert 'WHERE ledger.accounts.id = ?' in sql
+
+
+def test_schema_in_delete():
+    """Test that DELETE includes schema in table name"""
+    class Accounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    query = Accounts.delete().where(Accounts.id == '1')
+    sql, params = query.render()
+
+    assert 'DELETE FROM ledger.accounts' in sql
+    assert 'WHERE ledger.accounts.id = ?' in sql
+
+
+def test_schema_in_join():
+    """Test that JOIN includes schema in table name"""
+    class LedgerAccounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    class Transactions(Table, table_name='transactions', schema='ledger'):
+        id: Column
+        account_id: Column
+        amount: Column
+
+    query = (Transactions.select(Transactions.id, LedgerAccounts.name)
+             .join(LedgerAccounts, Transactions.account_id == LedgerAccounts.id))
+    sql, params = query.render()
+
+    assert 'SELECT ledger.transactions.id, ledger.accounts.name' in sql
+    assert 'FROM ledger.transactions' in sql
+    assert 'INNER JOIN ledger.accounts ON ledger.transactions.account_id = ledger.accounts.id' in sql
+
+
+def test_schema_mixed_with_no_schema():
+    """Test that tables with schema can join with tables without schema"""
+    class SchemaTable(Table, table_name='schematbl', schema='myschema'):
+        id: Column
+
+    class NoSchemaTable(Table, table_name='noschematbl'):
+        id: Column
+        ref_id: Column
+
+    query = (NoSchemaTable.select(NoSchemaTable.id, SchemaTable.id)
+             .join(SchemaTable, NoSchemaTable.ref_id == SchemaTable.id))
+    sql, params = query.render()
+
+    assert 'SELECT noschematbl.id, myschema.schematbl.id' in sql
+    assert 'FROM noschematbl' in sql
+    assert 'INNER JOIN myschema.schematbl ON noschematbl.ref_id = myschema.schematbl.id' in sql
+
+
+def test_schema_with_column_alias():
+    """Test that schema works with column aliases"""
+    class Accounts(Table, table_name='accounts', schema='ledger'):
+        id: Column
+        name: Column
+
+    query = Accounts.select(Accounts.id.as_('account_id'), Accounts.name.as_('account_name'))
+    sql, params = query.render()
+
+    assert 'SELECT ledger.accounts.id AS account_id, ledger.accounts.name AS account_name' in sql
+    assert 'FROM ledger.accounts' in sql
+
+
 def test_group_by():
     """Test GROUP BY clause"""
     query = Posts.select(Posts.user_id).group_by(Posts.user_id)
@@ -843,3 +957,111 @@ def test_complex_query_with_new_operators():
     assert 'AND users.id NOT IN' in sql
     assert 'AND users.username ILIKE ?' in sql
     assert params == [1, 100, 5, 10, 15, '%test%']
+
+
+def test_insert_with_static_default():
+    """Test that static default values are applied when column is omitted"""
+    from sqlalchemy import MetaData, Column as SAColumn, String
+
+    metadata = MetaData()
+
+    class Articles(Table, table_name='articles', metadata=metadata):
+        id = SAColumn(String, primary_key=True)
+        title = SAColumn(String)
+        status = SAColumn(String, default='draft')
+
+    query = Articles.insert(id='123', title='Test Article')
+    sql, params = query.render()
+
+    assert 'INSERT INTO articles' in sql
+    assert 'status' in sql
+    assert params == ['123', 'Test Article', 'draft']
+
+
+def test_insert_with_callable_default():
+    """Test that callable defaults are invoked when column is omitted"""
+    from sqlalchemy import MetaData, Column as SAColumn, String
+
+    metadata = MetaData()
+
+    class Articles(Table, table_name='articles', metadata=metadata):
+        id = SAColumn(String, primary_key=True, default=lambda: 'generated_id')
+        title = SAColumn(String)
+
+    query = Articles.insert(title='Test Article')
+    sql, params = query.render()
+
+    assert 'INSERT INTO articles' in sql
+    assert 'id' in sql
+    assert 'generated_id' in params
+    assert 'Test Article' in params
+
+
+def test_insert_overrides_default():
+    """Test that user-provided values override defaults"""
+    from sqlalchemy import MetaData, Column as SAColumn, String
+
+    metadata = MetaData()
+
+    class Articles(Table, table_name='articles', metadata=metadata):
+        id = SAColumn(String, primary_key=True)
+        status = SAColumn(String, default='draft')
+
+    query = Articles.insert(id='123', status='published')
+    sql, params = query.render()
+
+    assert 'INSERT INTO articles' in sql
+    assert params == ['123', 'published']
+
+
+def test_insert_without_metadata_ignores_defaults():
+    """Test that defaults are only applied when metadata is present"""
+    class SimpleTable(Table, table_name='simple'):
+        id: Column
+        name: Column
+
+    query = SimpleTable.insert(id='1', name='test')
+    sql, params = query.render()
+
+    assert 'INSERT INTO simple' in sql
+    assert params == ['1', 'test']
+
+
+def test_update_with_onupdate_default():
+    """Test that onupdate defaults are applied during UPDATE"""
+    from sqlalchemy import MetaData, Column as SAColumn, String
+    from datetime import datetime
+
+    metadata = MetaData()
+
+    class Articles(Table, table_name='articles', metadata=metadata):
+        id = SAColumn(String, primary_key=True)
+        title = SAColumn(String)
+        updated_at = SAColumn(String, onupdate=lambda: 'updated_timestamp')
+
+    query = Articles.update({'title': 'Updated Title'}).where(Articles.id == '123')
+    sql, params = query.render()
+
+    assert 'UPDATE articles SET' in sql
+    assert 'updated_at' in sql
+    assert 'updated_timestamp' in params
+    assert 'Updated Title' in params
+
+
+def test_update_overrides_onupdate():
+    """Test that user-provided values override onupdate defaults"""
+    from sqlalchemy import MetaData, Column as SAColumn, String
+
+    metadata = MetaData()
+
+    class Articles(Table, table_name='articles', metadata=metadata):
+        id = SAColumn(String, primary_key=True)
+        title = SAColumn(String)
+        updated_at = SAColumn(String, onupdate=lambda: 'auto_timestamp')
+
+    query = Articles.update({'title': 'Updated', 'updated_at': 'manual_timestamp'}).where(Articles.id == '123')
+    sql, params = query.render()
+
+    assert 'UPDATE articles SET' in sql
+    assert 'manual_timestamp' in params
+    assert 'auto_timestamp' not in params

@@ -18,14 +18,18 @@ except ImportError:
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
-    def __init__(self, table_name: str, column_name: str, python_type: type = None, alias: str = None):
+    def __init__(self, table_name: str, column_name: str, python_type: type = None, alias: str = None, schema: str = None):
         self.table_name = table_name
         self.column_name = column_name
         self.python_type = python_type
         self.alias = alias
+        self.schema = schema
 
     def __str__(self) -> str:
-        base = f"{self.table_name}.{self.column_name}"
+        if self.schema:
+            base = f"{self.schema}.{self.table_name}.{self.column_name}"
+        else:
+            base = f"{self.table_name}.{self.column_name}"
         if self.alias:
             return f"{base} AS {self.alias}"
         return base
@@ -47,7 +51,7 @@ class Column:
         Example:
             users.select(users.first_name.as_('first'), users.last_name.as_('last'))
         """
-        return Column(self.table_name, self.column_name, self.python_type, alias)
+        return Column(self.table_name, self.column_name, self.python_type, alias, self.schema)
 
     def __eq__(self, other) -> 'Condition':
         if other is None:
@@ -303,7 +307,8 @@ class ColumnDescriptor:
     def __get__(self, obj, objtype=None) -> Column:
         if objtype is None:
             objtype = type(obj)
-        return Column(objtype.table_name, self.column_name, self.python_type)
+        schema = getattr(objtype, 'schema', None)
+        return Column(objtype.table_name, self.column_name, self.python_type, schema=schema)
 
 
 class Condition:
@@ -376,7 +381,10 @@ class Join:
 
     def to_tsql(self) -> Template:
         """Convert join to a t-string fragment"""
-        table_name = self.table.table_name
+        if self.table.schema:
+            table_name = f"{self.table.schema}.{self.table.table_name}"
+        else:
+            table_name = self.table.table_name
         join_type = self.join_type
         condition_tsql = self.condition.to_tsql()
         return t'{join_type:unsafe} JOIN {table_name:literal} ON {condition_tsql}'
@@ -387,7 +395,28 @@ class InsertBuilder:
 
     def __init__(self, base_table: 'Table', values: dict[str, Any]):
         self.base_table = base_table
-        self.values = values
+
+        # Apply defaults from SQLAlchemy columns if available
+        if HAS_SQLALCHEMY and hasattr(base_table, '_sa_table') and base_table._sa_table is not None:
+            merged_values = dict(values)  # Start with user-provided values
+            for col in base_table._sa_table.columns:
+                # Check if column has a default and wasn't provided by user
+                if col.name not in merged_values and col.default is not None:
+                    # Get the default value
+                    default_arg = col.default.arg
+                    if callable(default_arg):
+                        # Call it with None context (we don't have execution context here)
+                        try:
+                            merged_values[col.name] = default_arg(None)
+                        except TypeError:
+                            # If it fails with TypeError, try calling without arguments
+                            merged_values[col.name] = default_arg()
+                    else:
+                        merged_values[col.name] = default_arg
+            self.values = merged_values
+        else:
+            self.values = values
+
         self._ignore = False
         self._on_conflict_action: Optional[str] = None
         self._conflict_cols: Optional[List[str]] = None
@@ -445,7 +474,10 @@ class InsertBuilder:
         """Build the final TSQL object"""
         parts: List[Template] = []
 
-        table_name = self.base_table.table_name
+        if self.base_table.schema:
+            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
+        else:
+            table_name = self.base_table.table_name
         values_dict = self.values
 
         # MySQL INSERT IGNORE
@@ -532,7 +564,28 @@ class UpdateBuilder:
 
     def __init__(self, base_table: 'Table', values: dict[str, Any]):
         self.base_table = base_table
-        self.values = values
+
+        # Apply onupdate defaults from SQLAlchemy columns if available
+        if HAS_SQLALCHEMY and hasattr(base_table, '_sa_table') and base_table._sa_table is not None:
+            merged_values = dict(values)  # Start with user-provided values
+            for col in base_table._sa_table.columns:
+                # Check if column has an onupdate and wasn't provided by user
+                if col.name not in merged_values and col.onupdate is not None:
+                    # Get the onupdate value
+                    onupdate_arg = col.onupdate.arg
+                    if callable(onupdate_arg):
+                        # Call it with None context (we don't have execution context here)
+                        try:
+                            merged_values[col.name] = onupdate_arg(None)
+                        except TypeError:
+                            # If it fails with TypeError, try calling without arguments
+                            merged_values[col.name] = onupdate_arg()
+                    else:
+                        merged_values[col.name] = onupdate_arg
+            self.values = merged_values
+        else:
+            self.values = values
+
         self._conditions: List[Union[Condition, Template]] = []
         self._returning_cols: Optional[List[str]] = None
 
@@ -554,7 +607,10 @@ class UpdateBuilder:
         """Build the final TSQL object"""
         parts: List[Template] = []
 
-        table_name = self.base_table.table_name
+        if self.base_table.schema:
+            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
+        else:
+            table_name = self.base_table.table_name
         values_dict = self.values
         parts.append(t'UPDATE {table_name:literal} SET {values_dict:as_set}')
 
@@ -615,7 +671,10 @@ class DeleteBuilder:
         """Build the final TSQL object"""
         parts: List[Template] = []
 
-        table_name = self.base_table.table_name
+        if self.base_table.schema:
+            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
+        else:
+            table_name = self.base_table.table_name
         parts.append(t'DELETE FROM {table_name:literal}')
 
         if self._conditions:
@@ -754,7 +813,10 @@ class QueryBuilder:
         else:
             parts.append(t'SELECT *')
 
-        table_name = self.base_table.table_name
+        if self.base_table.schema:
+            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
+        else:
+            table_name = self.base_table.table_name
         parts.append(t'FROM {table_name:literal}')
 
         for join in self._joins:

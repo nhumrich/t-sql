@@ -31,6 +31,29 @@ def test_table_creation():
     assert Users.username.column_name == 'username'
 
 
+def test_column_name_remapping():
+    """Test that Column(column_name=...) allows remapping Python attribute to DB column name"""
+    class MyTable(Table, table_name='my_table'):
+        id: Column
+        system_var: Column = Column(column_name='systemvar')
+
+    # Verify that the Python attribute name is 'system_var'
+    assert isinstance(MyTable.system_var, Column)
+    assert MyTable.system_var.table_name == 'my_table'
+
+    # But the DB column name is 'systemvar'
+    assert MyTable.system_var.column_name == 'systemvar'
+
+    # Verify it works in queries
+    query = MyTable.select(MyTable.system_var).where(MyTable.system_var == 'test')
+    sql, params = query.render()
+
+    # The SQL should use 'systemvar', not 'system_var'
+    assert 'my_table.systemvar' in sql
+    assert 'system_var' not in sql
+    assert params == ['test']
+
+
 def test_column_equality():
     """Test Column equality operator"""
     condition = Users.id == 5
@@ -256,7 +279,7 @@ def test_column_to_column_comparison():
 
 
 def test_to_tsql_returns_tsql_object():
-    """Test that QueryBuilder.to_tsql() returns a TSQL object"""
+    """Test that SelectQueryBuilder.to_tsql() returns a TSQL object"""
     query = Users.select(Users.id).where(Users.id > 5)
     tsql_obj = query.to_tsql()
 
@@ -913,7 +936,7 @@ def test_where_with_not_ilike():
 
 
 def test_in_with_subquery():
-    """Test IN with a subquery (QueryBuilder)"""
+    """Test IN with a subquery (SelectQueryBuilder)"""
     subquery = Users.select(Users.id).where(Users.username.like('%admin%'))
     query = Posts.select().where(Posts.user_id.in_(subquery))
     sql, params = query.render()
@@ -924,7 +947,7 @@ def test_in_with_subquery():
 
 
 def test_not_in_with_subquery():
-    """Test NOT IN with a subquery (QueryBuilder)"""
+    """Test NOT IN with a subquery (SelectQueryBuilder)"""
     subquery = Users.select(Users.id).where(Users.username.like('%banned%'))
     query = Posts.select().where(Posts.user_id.not_in(subquery))
     sql, params = query.render()

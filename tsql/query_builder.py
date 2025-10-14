@@ -1,6 +1,7 @@
 from typing import Any, List, Optional, Union, ClassVar
 from string.templatelib import Template
 from datetime import datetime
+from abc import ABC, abstractmethod
 
 from tsql import TSQL, t_join
 
@@ -18,7 +19,7 @@ except ImportError:
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
-    def __init__(self, table_name: str, column_name: str, python_type: type = None, alias: str = None, schema: str = None):
+    def __init__(self, table_name: str = None, column_name: str = None, python_type: type = None, alias: str = None, schema: str = None):
         self.table_name = table_name
         self.column_name = column_name
         self.python_type = python_type
@@ -75,21 +76,21 @@ class Column:
     def __ge__(self, other) -> 'Condition':
         return Condition(self, '>=', other)
 
-    def in_(self, values: Union[list, tuple, 'Column', Template, 'QueryBuilder']) -> 'Condition':
+    def in_(self, values: Union[list, tuple, 'Column', Template, 'SelectQueryBuilder']) -> 'Condition':
         """Create an IN condition
 
         Args:
-            values: List/tuple of values, a Column, a Template (t-string), or a QueryBuilder for subqueries
+            values: List/tuple of values, a Column, a Template (t-string), or a SelectQueryBuilder for subqueries
         """
         if isinstance(values, (list, tuple)):
             return Condition(self, 'IN', tuple(values))
         return Condition(self, 'IN', values)
 
-    def not_in(self, values: Union[list, tuple, 'Column', Template, 'QueryBuilder']) -> 'Condition':
+    def not_in(self, values: Union[list, tuple, 'Column', Template, 'SelectQueryBuilder']) -> 'Condition':
         """Create a NOT IN condition
 
         Args:
-            values: List/tuple of values, a Column, a Template (t-string), or a QueryBuilder for subqueries
+            values: List/tuple of values, a Column, a Template (t-string), or a SelectQueryBuilder for subqueries
         """
         if isinstance(values, (list, tuple)):
             return Condition(self, 'NOT IN', tuple(values))
@@ -186,7 +187,7 @@ class Table:
                 'value': getattr(cls, field_name, None)
             }
 
-        # Then, check for Ellipsis (...) assignments and SA Columns
+        # Then, check for Ellipsis (...) assignments, SA Columns, and Column instances
         for field_name in dir(cls):
             if field_name.startswith('_'):
                 continue
@@ -201,6 +202,13 @@ class Table:
                     }
             # Check for SQLAlchemy Column objects
             elif HAS_SQLALCHEMY and isinstance(field_value, SAColumnType):
+                if field_name not in all_fields:
+                    all_fields[field_name] = {
+                        'type': None,
+                        'value': field_value
+                    }
+            # Check for Column instances (for column_name remapping)
+            elif isinstance(field_value, Column):
                 if field_name not in all_fields:
                     all_fields[field_name] = {
                         'type': None,
@@ -223,6 +231,23 @@ class Table:
 
                 # Create query builder ColumnDescriptor
                 setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
+                continue
+
+            # Check if it's a Column instance (for column_name remapping)
+            if isinstance(field_value, Column):
+                # Extract the column_name from the Column instance
+                db_column_name = field_value.column_name
+                if db_column_name is None:
+                    # No column_name specified, use field_name
+                    db_column_name = field_name
+
+                # Create query builder ColumnDescriptor with the DB column name
+                setattr(cls, field_name, ColumnDescriptor(db_column_name, field_type))
+
+                # Create SQLAlchemy column if metadata provided
+                if metadata is not None and HAS_SQLALCHEMY:
+                    sa_type = PYTHON_TO_SA.get(field_type, String)()
+                    sa_columns.append(SAColumn(db_column_name, sa_type))
                 continue
 
             # Check if it's an Ellipsis (...) declaration
@@ -249,9 +274,9 @@ class Table:
             cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, schema=schema)
 
     @classmethod
-    def select(cls, *columns: Union['Column', Template]) -> 'QueryBuilder':
+    def select(cls, *columns: Union['Column', Template]) -> 'SelectQueryBuilder':
         """Start building a SELECT query"""
-        builder = QueryBuilder(cls)
+        builder = SelectQueryBuilder(cls)
         if columns:
             builder.select(*columns)
         return builder
@@ -390,7 +415,31 @@ class Join:
         return t'{join_type:unsafe} JOIN {table_name:literal} ON {condition_tsql}'
 
 
-class InsertBuilder:
+class QueryBuilder(ABC):
+    """Abstract base class for all query builders.
+
+    All query builders (SELECT, INSERT, UPDATE, DELETE) implement this interface,
+    allowing middleware and query handlers to accept any builder type.
+    """
+
+    @abstractmethod
+    def to_tsql(self) -> TSQL:
+        """Build and return a TSQL object representing the query."""
+        ...
+
+    def render(self, style=None) -> tuple[str, list]:
+        """Convenience method to render the query directly.
+
+        Args:
+            style: Optional parameter style (e.g., QMARK, NUMERIC, etc.)
+
+        Returns:
+            Tuple of (sql_string, parameters)
+        """
+        return self.to_tsql().render(style)
+
+
+class InsertBuilder(QueryBuilder):
     """Fluent interface for building INSERT queries"""
 
     def __init__(self, base_table: 'Table', values: dict[str, Any]):
@@ -572,7 +621,7 @@ class InsertBuilder:
             return f"InsertBuilder(<error rendering: {e}>)"
 
 
-class UpdateBuilder:
+class UpdateBuilder(QueryBuilder):
     """Fluent interface for building UPDATE queries"""
 
     def __init__(self, base_table: 'Table', values: dict[str, Any]):
@@ -663,7 +712,7 @@ class UpdateBuilder:
             return f"UpdateBuilder(<error rendering: {e}>)"
 
 
-class DeleteBuilder:
+class DeleteBuilder(QueryBuilder):
     """Fluent interface for building DELETE queries"""
 
     def __init__(self, base_table: 'Table'):
@@ -731,8 +780,8 @@ class DeleteBuilder:
             return f"DeleteBuilder(<error rendering: {e}>)"
 
 
-class QueryBuilder:
-    """Fluent interface for building SQL queries"""
+class SelectQueryBuilder(QueryBuilder):
+    """Fluent interface for building SQL SELECT queries"""
 
     def __init__(self, base_table: 'Table'):
         self.base_table = base_table
@@ -745,7 +794,7 @@ class QueryBuilder:
         self._limit_value: Optional[int] = None
         self._offset_value: Optional[int] = None
 
-    def select(self, *columns: Union[Column, Template]) -> 'QueryBuilder':
+    def select(self, *columns: Union[Column, Template]) -> 'SelectQueryBuilder':
         """Specify columns to select
 
         Args:
@@ -764,7 +813,7 @@ class QueryBuilder:
         self._columns = list(columns) if columns else None
         return self
 
-    def where(self, condition: Union[Condition, Template]) -> 'QueryBuilder':
+    def where(self, condition: Union[Condition, Template]) -> 'SelectQueryBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)
 
         Accepts either Condition objects from query builder or raw t-string Templates
@@ -772,20 +821,20 @@ class QueryBuilder:
         self._conditions.append(condition)
         return self
 
-    def join(self, table: 'Table', on: Condition, join_type: str = 'INNER') -> 'QueryBuilder':
+    def join(self, table: 'Table', on: Condition, join_type: str = 'INNER') -> 'SelectQueryBuilder':
         """Add a JOIN clause"""
         self._joins.append(Join(table, on, join_type))
         return self
 
-    def left_join(self, table: 'Table', on: Condition) -> 'QueryBuilder':
+    def left_join(self, table: 'Table', on: Condition) -> 'SelectQueryBuilder':
         """Add a LEFT JOIN clause"""
         return self.join(table, on, 'LEFT')
 
-    def right_join(self, table: 'Table', on: Condition) -> 'QueryBuilder':
+    def right_join(self, table: 'Table', on: Condition) -> 'SelectQueryBuilder':
         """Add a RIGHT JOIN clause"""
         return self.join(table, on, 'RIGHT')
 
-    def order_by(self, *columns: Union[Column, tuple[Column, str]]) -> 'QueryBuilder':
+    def order_by(self, *columns: Union[Column, tuple[Column, str]]) -> 'SelectQueryBuilder':
         """Add ORDER BY clause. Pass (column, 'DESC') for descending"""
         for col in columns:
             if isinstance(col, tuple):
@@ -794,12 +843,12 @@ class QueryBuilder:
                 self._order_by_columns.append((col, 'ASC'))
         return self
 
-    def group_by(self, *columns: Column) -> 'QueryBuilder':
+    def group_by(self, *columns: Column) -> 'SelectQueryBuilder':
         """Add GROUP BY clause"""
         self._group_by_columns.extend(columns)
         return self
 
-    def having(self, condition: Union[Condition, Template]) -> 'QueryBuilder':
+    def having(self, condition: Union[Condition, Template]) -> 'SelectQueryBuilder':
         """Add HAVING condition (multiple calls are ANDed together)
 
         Accepts either Condition objects from query builder or raw t-string Templates
@@ -807,12 +856,12 @@ class QueryBuilder:
         self._having_conditions.append(condition)
         return self
 
-    def limit(self, n: int) -> 'QueryBuilder':
+    def limit(self, n: int) -> 'SelectQueryBuilder':
         """Add LIMIT clause"""
         self._limit_value = n
         return self
 
-    def offset(self, n: int) -> 'QueryBuilder':
+    def offset(self, n: int) -> 'SelectQueryBuilder':
         """Add OFFSET clause"""
         self._offset_value = n
         return self
@@ -894,10 +943,10 @@ class QueryBuilder:
         try:
             query, params = self.to_tsql().render()
             if params:
-                return f"QueryBuilder(\n  SQL: {query}\n  Params: {params}\n)"
-            return f"QueryBuilder({query})"
+                return f"SelectQueryBuilder(\n  SQL: {query}\n  Params: {params}\n)"
+            return f"SelectQueryBuilder({query})"
         except Exception as e:
-            return f"QueryBuilder(<error rendering: {e}>)"
+            return f"SelectQueryBuilder(<error rendering: {e}>)"
 
 
 # Python type to SQLAlchemy type mapping (for simple type annotations)

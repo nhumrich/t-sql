@@ -154,61 +154,6 @@ def test_select_int_id_safe():
     assert params == [42]
 
 
-def test_upsert_single_conflict():
-    """Test upsert with a single conflict column"""
-    values = {
-        'email': 'test@example.com',
-        'name': 'Alice',
-        'age': 30
-    }
-
-    query = tsql.upsert('users', values, conflict_on='email')
-    result = tsql.render(query)
-
-    assert "INSERT INTO users" in result[0]
-    assert "email" in result[0] and "name" in result[0] and "age" in result[0]
-    assert "ON CONFLICT (email)" in result[0]
-    assert "DO UPDATE SET" in result[0]
-    assert "name = EXCLUDED.name" in result[0]
-    assert "age = EXCLUDED.age" in result[0]
-    assert "email = EXCLUDED.email" not in result[0]  # Conflict column shouldn't be in UPDATE
-    assert result[1] == ['test@example.com', 'Alice', 30]
-
-
-def test_upsert_multiple_conflicts():
-    """Test upsert with multiple conflict columns"""
-    values = {
-        'email': 'test@example.com',
-        'username': 'alice',
-        'name': 'Alice Smith'
-    }
-
-    query = tsql.upsert('users', values, conflict_on=['email', 'username'])
-    result = tsql.render(query)
-
-    assert "INSERT INTO users" in result[0]
-    assert "ON CONFLICT (email, username)" in result[0]
-    assert "DO UPDATE SET" in result[0]
-    assert "name = EXCLUDED.name" in result[0]
-    assert "email = EXCLUDED.email" not in result[0]
-    assert "username = EXCLUDED.username" not in result[0]
-
-
-def test_upsert_all_conflict_columns():
-    """Test upsert where all columns are conflict columns (should DO NOTHING)"""
-    values = {
-        'email': 'test@example.com'
-    }
-
-    query = tsql.upsert('users', values, conflict_on='email')
-    result = tsql.render(query)
-
-    assert "INSERT INTO users" in result[0]
-    assert "ON CONFLICT (email)" in result[0]
-    assert "DO NOTHING" in result[0]
-    assert "DO UPDATE" not in result[0]
-
-
 def test_delete():
     """Test the delete helper function"""
     query = tsql.delete('users', 123)

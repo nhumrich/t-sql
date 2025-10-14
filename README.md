@@ -1,17 +1,18 @@
-# tsql
+# t-sql
 
 A lightweight SQL templating library that leverages Python 3.14's t-strings (PEP 750).
+(Note: This library has absolutely nothing to do with Microsoft SQLServer)
 
-TSQL provides a safe way to write SQL queries using Python's template strings (t-strings) while preventing SQL injection attacks through multiple parameter styling options.
+t-sql provides a safe way to write SQL queries using Python's template strings (t-strings) while preventing SQL injection attacks through multiple parameter styling options.
 
 ## ⚠️ Python Version Requirement
 This library requires Python 3.14+
 
-TSQL is built specifically to take advantage of the new t-string feature introduced in PEP 750, which is only available in Python 3.14+.
+t-sql is built specifically to take advantage of the new t-string feature introduced in PEP 750, which is only available in Python 3.14+.
 
 ## Installing
 
-```
+```bash
 # with pip
 pip install t-sql
 
@@ -19,221 +20,238 @@ pip install t-sql
 uv add t-sql
 ```
 
-## using
+## Quick Start
 
-```
+```python
 import tsql
 
-tsql.render(t"select * from users where name={name)")
+# Basic usage
+name = 'billy'
+query = t'select * from users where name={name}'
+
+# Render with default QMARK style
+sql, params = tsql.render(query)
+# ('select * from users where name = ?', ['billy'])
+
+# Or use a different parameter style
+sql, params = tsql.render(query, style=tsql.styles.NUMERIC_DOLLAR)
+# ('select * from users where name = $1', ['billy'])
 ```
 
 ## Parameter Styles
 
 - **QMARK** (default): Uses `?` placeholders
-- **NUMERIC**: Uses `:1`, `:2`, etc. placeholders  
+- **NUMERIC**: Uses `:1`, `:2`, etc. placeholders
 - **NAMED**: Uses `:name` placeholders
 - **FORMAT**: Uses `%s` placeholders
 - **PYFORMAT**: Uses `%(name)s` placeholders
 - **NUMERIC_DOLLAR**: Uses `$1`, `$2`, etc. (PostgreSQL native)
 - **ESCAPED**: Escapes values directly into SQL (no parameters)
 
-## Examples:
+## Core Features
+
+### SQL Injection Prevention
 
 ```python
-
-# Basic usage with different parameter styles
-import tsql
-import tsql.styles
-
-name = 'billy'
-query = t'select * from users where name={name}'
-
-# Default QMARK style
-print(tsql.render(query))
-# ('select * from users where name = ?', ['billy'])
-
-# PostgreSQL native style
-print(tsql.render(query, style=tsql.styles.NUMERIC_DOLLAR))
-# ('select * from users where name = $1', ['billy'])
-
-# ESCAPED style (no parameters)
-print(tsql.render(query, style=tsql.styles.ESCAPED))
-# ("select * from users where name = 'billy'", [])
-
-# SQL injection prevention
+# SQL injection prevention works automatically
 name = "billy ' and 1=1 --"
-print(tsql.render(query, style=tsql.styles.ESCAPED))
+sql, params = tsql.render(t'select * from users where name={name}')
+# Even with ESCAPED style, quotes are properly escaped
+sql, _ = tsql.render(t'select * from users where name={name}', style=tsql.styles.ESCAPED)
 # ("select * from users where name = 'billy '' and 1=1 --'", [])
-
 ```
 
-## Format-spec helpers
+### Format-spec helpers
 
-There are some built-in format spec helpers that can change the way some 
-parts of the library work. 
+#### Literal
 
-### Literal 
-One common example is you may want to set the name
-of a column dynamically. By using the `literal` format spec, the value will
-be sanitized against a valid literal and put straight into the sql query since 
-you cannot parameterize that part of a query, example:
+For table/column names that can't be parameterized:
 
 ```python
+table = "users"
+col = "name"
+val = "billy"
 query = t'select * from {table:literal} where {col:literal}={val}'
+sql, params = tsql.render(query)
+# ('select * from users where name = ?', ['billy'])
 ```
 
-or, a full example:
-```python
+#### unsafe
 
-# with a like clause
-min_age = 30
-search_column = "name"
-pattern = "O'Brien"
-is_active = True
-tsql.render(t"SELECT * FROM test_users WHERE age >= {min_age} AND {search_column:literal} LIKE '%' || {pattern} || '%' AND active = {is_active}")
+For cases where you need to bypass safety (use with extreme caution):
+
+```python
+dynamic_where = "age > 18 AND active = true"
+sql, params = tsql.render(t"SELECT * FROM users WHERE {dynamic_where:unsafe}")
 ```
 
-### unsafe
-You may want to do advanced things that may otherwise be considered unsfe. 
-This is okay if you can be sure that a user is not providing input. Like maybe
-you care storing a query for some reason.
-As per the name, this can open you up to sql injection and should be used with 
-extreme caution.
-You can use the "unsafe" format spec for these
-cases:
-```python
-dynamic_where = input('type where clause')
-tsql.render(t"SELECT * FROM users WHERE {dynamic_where:unsafe}")
-```
+#### as_values
 
-### as_values
-
-The spec `:as_values` formats a dictionary into the format:
-`(key1, key2, ...) VALUES (value1, value2, ...)` for uses in insert statements.
-
-### as_set
-
-The spec `:as_set` formats a dictionary into the format:
-`key1='?', key2='?'` for uses in update statements.
-
-### traditional format_spec
-
-All other format specs should be handled as they would in a normal f-string. 
-
-## Included helper methods
+Formats a dictionary for INSERT statements:
 
 ```python
-# select
-tsql.select('table', 'abc123')
-# SELECT * FROM table WHERE id='abc123'
-
-# select with multiple ids and specific columns
-tsql.select('users', ['abc123', 'def456'], columns=['name', 'age'])
-# SELECT name, age FROM users WHERE id in ('abc123', 'def456')
-
-
-# t_join (joins multiple t-strings together like .join on a str)
-tsql.t_join(t" ", [t"hello", t"there"])
-# t"hello there"
-
-
-# insert
-table = 'users'
 values = {'id': 'abc123', 'name': 'bob', 'email': 'bob@example.com'}
-tsql.insert(table, values)
-# INSERT INTO users (id, name, email) VALUES ('abc123', 'bob', 'bob@example.com')
+sql, params = tsql.render(t"INSERT INTO users {values:as_values}")
+# ('INSERT INTO users (id, name, email) VALUES (?, ?, ?)', ['abc123', 'bob', 'bob@example.com'])
+```
 
-# insert with ignore_conflict
-tsql.insert(table, values, ignore_conflict=True)
-# INSERT INTO users (id, name, email) VALUES ('abc123', 'bob', 'bob@example.com') ON CONFLICT DO NOTHING RETURNING *
+#### as_set
 
-# upsert (insert or update on conflict)
-values = {'id': 'abc123', 'name': 'joe', 'email': 'joe@example.com'}
-tsql.upsert(table, values, conflict_on='id')
-# INSERT INTO users (id, name, email) VALUES ('abc123', 'joe', 'joe@example.com')
-# ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email RETURNING *
+Formats a dictionary for UPDATE statements:
 
-# upsert with multiple conflict columns
-tsql.upsert(table, values, conflict_on=['email', 'name'])
-# ON CONFLICT (email, name) DO UPDATE SET ...
-
-# update values on a single row
-table = 'users'
+```python
 values = {'name': 'joe', 'email': 'joe@example.com'}
-tsql.update(table, values, id='abc123')
-# UPDATE users SET name='joe', email='joe@example.com' WHERE id='abc123' RETURNING *
+sql, params = tsql.render(t"UPDATE users SET {values:as_set} WHERE id='abc123'")
+# ('UPDATE users SET name = ?, email = ? WHERE id='abc123'', ['joe', 'joe@example.com'])
+```
 
-# delete a single row
-tsql.delete(table, id='abc123')
-# DELETE FROM users WHERE id = 'abc123'
+### Helper Functions
+
+t-sql provides several convenience functions for common SQL operations:
+
+#### t_join
+
+Joins multiple t-strings together:
+
+```python
+import tsql
+
+min_age = 18
+parts = [t"SELECT *", t"FROM users", t"WHERE age > {min_age}"]
+query = tsql.t_join(t" ", parts)
+sql, params = tsql.render(query)
+# ('SELECT * FROM users WHERE age > ?', [18])
+```
+
+#### select
+
+Quick SELECT queries:
+
+```python
+# Select all columns
+query = tsql.select('users')
+sql, params = query.render()
+# ('SELECT * FROM users', [])
+
+# Select specific columns
+query = tsql.select('users', columns=['name', 'email'])
+sql, params = query.render()
+# ('SELECT name, email FROM users', [])
+
+# With WHERE clause
+query = tsql.select('users', columns=['name', 'email'], where={'age': 18})
+sql, params = query.render()
+# ('SELECT name, email FROM users WHERE age = ?', [18])
+```
+
+#### insert
+
+Quick INSERT queries:
+
+```python
+values = {'id': 'abc123', 'name': 'bob', 'email': 'bob@example.com'}
+query = tsql.insert('users', values)
+sql, params = query.render()
+# ('INSERT INTO users (id, name, email) VALUES (?, ?, ?)', ['abc123', 'bob', 'bob@example.com'])
+```
+
+#### update
+
+Quick UPDATE queries:
+
+```python
+# Update by ID
+query = tsql.update('users', {'email': 'new@example.com'}, id_value='abc123')
+sql, params = query.render()
+# ('UPDATE users SET email = ? WHERE id = ?', ['new@example.com', 'abc123'])
+
+# Update with custom WHERE
+query = tsql.update('users', {'email': 'new@example.com'}, where={'age': 25})
+sql, params = query.render()
+# ('UPDATE users SET email = ? WHERE age = ?', ['new@example.com', 25])
+```
+
+#### delete
+
+Quick DELETE queries:
+
+```python
+# Delete by ID
+query = tsql.delete('users', id_value='abc123')
+sql, params = query.render()
+# ('DELETE FROM users WHERE id = ?', ['abc123'])
+
+# Delete with custom WHERE
+query = tsql.delete('users', where={'age': 18})
+sql, params = query.render()
+# ('DELETE FROM users WHERE age = ?', [18])
+```
+
+**Note:** These helper functions return query builder objects, so you can chain additional methods:
+
+```python
+query = tsql.select('users').where(t'age > {min_age}').limit(10)
+sql, params = query.render()
 ```
 
 # Query Builder
 
-For a more structured approach to building queries, TSQL includes an optional query builder that provides a fluent interface with type-safe column references.
+For a more structured approach, t-sql includes an optional query builder with a fluent interface and type-safe column references.
 
 ## Basic Usage
 
 ```python
-from tsql.query_builder import table
+from tsql.query_builder import Table, Column
 
-@table('users')
-class Users:
-    id: int
-    username: str
-    email: str
-    created_at: str
+class Users(Table):
+    id: Column
+    username: Column
+    email: Column
+    age: Column
 
-# Decorator returns instance - use directly!
+# Simple SELECT
 query = Users.select(Users.id, Users.username)
 sql, params = query.render()
-# SELECT users.id, users.username FROM users
+# ('SELECT users.id, users.username FROM users', [])
 
 # With WHERE clause
-query = Users.select().where(Users.id > 100)
+query = Users.select().where(Users.age > 18)
 sql, params = query.render()
-# SELECT * FROM users WHERE users.id > ?
-# params: [100]
+# ('SELECT * FROM users WHERE users.age > ?', [18])
 
-# Multiple WHERE conditions (ANDed together)
+# Multiple conditions (ANDed together)
 query = (Users.select(Users.username, Users.email)
-         .where(Users.id > 10)
+         .where(Users.age > 18)
          .where(Users.email != None))
-sql, params = query.render()
-# SELECT users.username, users.email FROM users WHERE users.id > ? AND users.email IS NOT NULL
+```
+
+**Table Names:** The table name defaults to the lowercase class name. To specify a custom name:
+
+```python
+class UserAccount(Table, table_name='user_accounts'):
+    id: Column
+    username: Column
 ```
 
 ## Joins
 
 ```python
-@table('posts')
-class Posts:
-    id: int
-    user_id: int
-    title: str
-    body: str
-
-@table('comments')
-class Comments:
-    id: int
-    post_id: int
-    user_id: int
-    content: str
+class Posts(Table):
+    id: Column
+    user_id: Column
+    title: Column
 
 # INNER JOIN
 query = (Posts.select(Posts.title, Users.username)
-         .join(Users, Posts.user_id == Users.id)
+         .join(Users, on=Posts.user_id == Users.id)
          .where(Posts.id > 100))
-sql, params = query.render()
-# SELECT posts.title, users.username FROM posts INNER JOIN users ON posts.user_id = users.id WHERE posts.id > ?
 
-# LEFT JOIN with multiple tables
-query = (Comments.select(Comments.content, Posts.title, Users.username)
-         .join(Posts, Comments.post_id == Posts.id)
-         .left_join(Users, Comments.user_id == Users.id))
+# LEFT JOIN
+query = (Posts.select()
+         .left_join(Users, on=Posts.user_id == Users.id))
 ```
 
-## Additional Features
+## Query Features
 
 ```python
 # IN clause
@@ -243,104 +261,169 @@ query = Users.select().where(Users.id.in_([1, 2, 3]))
 query = Users.select().where(Users.username.like('%john%'))
 
 # ORDER BY
-query = Posts.select().order_by(Posts.created_at)
+query = Posts.select().order_by(Posts.id)
 query = Posts.select().order_by((Posts.id, 'DESC'))
 
-# LIMIT
-query = Posts.select().limit(10)
+# LIMIT and OFFSET
+query = Posts.select().limit(10).offset(20)
 
-# Complex query
-query = (Posts.select(Posts.title, Users.username)
-         .join(Users, Posts.user_id == Users.id)
-         .where(Posts.id > 100)
-         .where(Users.id >= 5)
-         .order_by((Posts.id, 'DESC'))
-         .limit(20))
+# GROUP BY and HAVING
+query = (Posts.select()
+         .group_by(Posts.user_id)
+         .having(t'COUNT(*) > {min_count}'))
 ```
 
 ## Write Operations
 
-The query builder supports INSERT, UPDATE, UPSERT, and DELETE operations:
+The query builder supports INSERT, UPDATE, and DELETE with database-agnostic conflict handling.
+
+### INSERT
 
 ```python
-# INSERT
+# Basic insert
 values = {'id': 'abc123', 'username': 'john', 'email': 'john@example.com'}
 query = Users.insert(values)
 sql, params = query.render()
-# INSERT INTO users (id, username, email) VALUES (?, ?, ?) RETURNING *
+# ('INSERT INTO users (id, username, email) VALUES (?, ?, ?)', ['abc123', 'john', 'john@example.com'])
 
-# INSERT with conflict handling (ignore)
-query = Users.insert(values, ignore_conflict=True)
+# INSERT with RETURNING (Postgres/SQLite)
+query = Users.insert(values).returning()
 sql, params = query.render()
-# INSERT INTO users (id, username, email) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING *
+# ('INSERT INTO users (id, username, email) VALUES (?, ?, ?) RETURNING *', [...])
 
-# UPSERT (INSERT ... ON CONFLICT DO UPDATE)
-values = {'id': 'abc123', 'username': 'john_updated', 'email': 'john@example.com'}
-query = Users.upsert(values, conflict_on='id')
+# INSERT IGNORE (MySQL)
+query = Users.insert(values).ignore()
 sql, params = query.render()
-# INSERT INTO users (id, username, email) VALUES (?, ?, ?)
-# ON CONFLICT (id) DO UPDATE SET username=EXCLUDED.username, email=EXCLUDED.email RETURNING *
+# ('INSERT IGNORE INTO users (id, username, email) VALUES (?, ?, ?)', [...])
 
-# UPSERT with multiple conflict columns
-query = Users.upsert(values, conflict_on=['email', 'username'])
-# Can also use Column objects: conflict_on=Users.id or conflict_on=[Users.email, Users.username]
+# ON CONFLICT DO NOTHING (Postgres/SQLite)
+query = Users.insert(values).on_conflict_do_nothing()
+# ('INSERT INTO users (...) VALUES (...) ON CONFLICT DO NOTHING', [...])
 
-# UPDATE with WHERE conditions
-query = Users.update({'email': 'newemail@example.com'}).where(Users.id == 'abc123')
-sql, params = query.render()
-# UPDATE users SET email=? WHERE users.id = ? RETURNING *
+# ON CONFLICT DO NOTHING with specific conflict target (Postgres/SQLite)
+query = Users.insert(values).on_conflict_do_nothing(conflict_on='email')
+# ('INSERT INTO users (...) VALUES (...) ON CONFLICT (email) DO NOTHING', [...])
 
-# UPDATE with multiple conditions
-query = (Users.update({'email': 'newemail@example.com'})
-         .where(Users.id == 'abc123')
-         .where(Users.username == 'john'))
+# ON CONFLICT DO UPDATE (Postgres/SQLite upsert)
+query = Users.insert(values).on_conflict_update(conflict_on='id')
+# ('INSERT INTO users (...) VALUES (...)
+#   ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, email = EXCLUDED.email', [...])
 
-# DELETE with WHERE conditions
-query = Users.delete().where(Users.id == 'abc123')
-sql, params = query.render()
-# DELETE FROM users WHERE users.id = ? RETURNING *
+# ON CONFLICT with custom update
+query = Users.insert(values).on_conflict_update(
+    conflict_on='id',
+    update={'username': 'updated_name'}
+)
 
-# DELETE with multiple conditions
-query = Users.delete().where(Users.id > 100).where(Users.email == None)
+# ON DUPLICATE KEY UPDATE (MySQL)
+query = Users.insert(values).on_duplicate_key_update()
+# ('INSERT INTO users (...) VALUES (...)
+#   ON DUPLICATE KEY UPDATE id = VALUES(id), username = VALUES(username), ...', [...])
+
+# Chain multiple modifiers
+query = (Users.insert(values)
+         .on_conflict_update(conflict_on='id')
+         .returning('id', 'username'))
 ```
 
-All write operations return `RETURNING *` by default to retrieve the affected rows.
-
-## Advanced Mixed Query (Query Builder + T-Strings)
-
-You can combine the query builder's structured approach with raw t-string conditions for complex logic:
+### UPDATE
 
 ```python
-from tsql.query_builder import table
-from sqlalchemy import MetaData, Column, String, Integer
+# Basic update (no WHERE = updates all rows!)
+query = Users.update({'email': 'newemail@example.com'})
+sql, params = query.render()
+# ('UPDATE users SET email = ?', ['newemail@example.com'])
 
-metadata = MetaData()
+# UPDATE with WHERE
+query = Users.update({'email': 'newemail@example.com'}).where(Users.id == 'abc123')
+sql, params = query.render()
+# ('UPDATE users SET email = ? WHERE users.id = ?', ['newemail@example.com', 'abc123'])
 
-@table('users', metadata=metadata)
-class Users:
-    id = Column(String, primary_key=True)
-    name = Column(String)
-    age = Column(Integer)
-    email = Column(String)
+# Multiple WHERE conditions
+query = (Users.update({'email': 'newemail@example.com'})
+         .where(Users.id == 'abc123')
+         .where(Users.age > 18))
 
-# Start with query builder for the base query
+# With RETURNING (Postgres/SQLite)
+query = (Users.update({'email': 'new@example.com'})
+         .where(Users.id == 'abc123')
+         .returning())
+# ('UPDATE users SET email = ? WHERE users.id = ? RETURNING *', [...])
+```
+
+### DELETE
+
+```python
+# Basic delete (no WHERE = deletes all rows!)
+query = Users.delete()
+sql, params = query.render()
+# ('DELETE FROM users', [])
+
+# DELETE with WHERE
+query = Users.delete().where(Users.id == 'abc123')
+sql, params = query.render()
+# ('DELETE FROM users WHERE users.id = ?', ['abc123'])
+
+# Multiple conditions
+query = Users.delete().where(Users.age < 18).where(Users.active == False)
+
+# With RETURNING (Postgres/SQLite)
+query = Users.delete().where(Users.id == 'abc123').returning()
+# ('DELETE FROM users WHERE users.id = ? RETURNING *', ['abc123'])
+```
+
+## Database Compatibility
+
+The query builder is database-agnostic - all methods are available regardless of which database you're using. It's your responsibility to use the appropriate methods for your database:
+
+**PostgreSQL:**
+- ✅ `.returning()` - RETURNING clause
+- ✅ `.on_conflict_do_nothing()` - ON CONFLICT DO NOTHING
+- ✅ `.on_conflict_update()` - ON CONFLICT DO UPDATE with EXCLUDED.*
+- ❌ `.ignore()` - Not supported
+- ❌ `.on_duplicate_key_update()` - Not supported
+
+**MySQL:**
+- ❌ `.returning()` - Not supported (MySQL limitation)
+- ✅ `.ignore()` - INSERT IGNORE
+- ✅ `.on_duplicate_key_update()` - ON DUPLICATE KEY UPDATE with VALUES()
+- ❌ `.on_conflict_do_nothing()` - Not supported
+- ❌ `.on_conflict_update()` - Not supported
+
+**SQLite:**
+- ✅ `.returning()` - RETURNING clause (SQLite 3.35+)
+- ✅ `.on_conflict_do_nothing()` - ON CONFLICT DO NOTHING
+- ✅ `.on_conflict_update()` - ON CONFLICT DO UPDATE
+- ❌ `.ignore()` - Not supported
+- ❌ `.on_duplicate_key_update()` - Not supported
+
+If you use an unsupported method, your database will raise a syntax error when you execute the query.
+
+## Mixing Query Builder with T-Strings
+
+You can combine the query builder with raw t-strings for complex logic:
+
+```python
+from tsql.query_builder import Table, Column
+
+class Users(Table):
+    id: Column
+    name: Column
+    age: Column
+    email: Column
+
+# Start with query builder
 query = Users.select(Users.id, Users.name, Users.email)
 
-# Add simple conditions with query builder
+# Add structured condition
 query = query.where(Users.age > 18)
 
-# Add complex logic with t-strings for advanced conditions
+# Add complex t-string condition for OR logic
 search_term = "john"
-min_age = 25
 name_col = str(Users.name)
 email_col = str(Users.email)
-age_col = str(Users.age)
-
-# Build advanced t-string condition with OR logic
-advanced_condition = t"{name_col:literal} LIKE '%' || {search_term} || '%' OR {email_col:literal} LIKE '%' || {search_term} || '%'"
-
-# Mix it into the query builder (t-string conditions are automatically wrapped in parentheses)
-query = query.where(advanced_condition)
+complex_condition = t"{name_col:literal} LIKE '%' || {search_term} || '%' OR {email_col:literal} LIKE '%' || {search_term} || '%'"
+query = query.where(complex_condition)
 
 sql, params = query.render()
 # SELECT users.id, users.name, users.email FROM users
@@ -348,24 +431,12 @@ sql, params = query.render()
 # params: [18, 'john', 'john']
 ```
 
-**Important:** When using t-string conditions with `.where()`, they are automatically wrapped in parentheses to ensure proper operator precedence when combined with other conditions using AND. This prevents issues when your t-string contains OR operators.
-
-This approach lets you use the query builder for structure and safety, while dropping down to t-strings when you need custom SQL logic that the query builder doesn't support.
-
-### Schema Support
-
-```python
-@table('users', schema='public')
-class Users:
-    id: int
-    name: str
-```
+Note: T-string conditions passed to `.where()` are automatically wrapped in parentheses to ensure proper operator precedence.
 
 ## SQLAlchemy & Alembic Integration
 
-The query builder can integrate with SQLAlchemy's metadata system, allowing alembic autogenerate to work while maintaining the clean query builder syntax.
+The query builder can integrate with SQLAlchemy's metadata system for alembic autogenerate:
 
-First, install with SQLAlchemy support:
 ```bash
 pip install t-sql[sqlalchemy]
 # or
@@ -374,107 +445,77 @@ uv add t-sql --optional sqlalchemy
 
 ### Two Ways to Define Columns
 
-**1. Simple type annotations** (no alembic needed):
+**1. Simple Column annotations** (for query builder only):
+
 ```python
-from tsql.query_builder import table
+from tsql import Table, Column
 
-@table('users')  # No metadata = query builder only
-class Users:
-    id: int
-    name: str
-    age: int
-
-# Decorator returns an instance - no need to instantiate!
-query = Users.select(Users.name).where(Users.age > 18)
+class Users(Table):
+    id: Column
+    name: Column
+    age: Column
 ```
 
-**2. SQLAlchemy Column objects** (for alembic integration - **recommended**):
+**2. SQLAlchemy Column objects** (for alembic integration):
+
 ```python
-from sqlalchemy import MetaData, Column, String, Integer, ForeignKey, TIMESTAMP
-from sqlalchemy.sql.functions import now
-from tsql.query_builder import table
+from sqlalchemy import MetaData, Column, String, Integer, ForeignKey
+from tsql.query_builder import Table
 
 metadata = MetaData()
 
-@table('users', metadata=metadata)
-class Users:
-    id = Column(String, primary_key=True, default=lambda: gen_id())
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    name = Column(String(100))
-    created_ts = Column(TIMESTAMP(timezone=True), server_default=now(), nullable=False)
-
-@table('posts', metadata=metadata)
-class Posts:
+class Users(Table, metadata=metadata):
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey('users.id', ondelete='CASCADE'), index=True)
-    title = Column(String(500))
-```
+    email = Column(String(255), unique=True, nullable=False)
+    name = Column(String(100))
+    age = Column(Integer)
 
-**You can mix both approaches**:
-```python
-@table('events', metadata=metadata)
-class Events:
-    id = Column(String, primary_key=True, default=lambda: gen_id("e"))  # Full SA
-    topic: str  # Simple - becomes nullable String column
-    created_ts = Column(TIMESTAMP(timezone=True), server_default=now())
-```
-
-### Using the Query Builder
-
-```python
-# For alembic (in your models.py or env.py)
+# Use for alembic
 target_metadata = metadata
 
-# For queries - use decorated classes directly (they're already instances!)
-query = (Posts.select(Posts.title, Users.name)
-         .join(Users, Posts.user_id == Users.id)
-         .where(Users.age > 18))
-
-sql, params = query.render()
+# Use for queries (works identically!)
+query = Users.select().where(Users.age > 18)
 ```
 
-### Why Use SQLAlchemy Column?
+You can mix both approaches:
 
-Using `Column(...)` directly gives you:
-- ✅ Full SQLAlchemy feature support (server defaults, computed columns, custom types, etc.)
-- ✅ `ondelete` cascade rules on foreign keys
-- ✅ Custom types like `JSONB`, `TIMESTAMP(timezone=True)`, `TypeDecorator`
-- ✅ Callable defaults: `default=lambda: gen_id()`
-- ✅ Server defaults: `server_default=now()`
-- ✅ Column comments
-- ✅ Everything SQLAlchemy supports
+```python
+from sqlalchemy import Column, String, DateTime
+from sqlalchemy.sql.functions import now
 
-### How It Works
-
-When you provide a `metadata` parameter to `@table()`, the decorator:
-1. Detects SQLAlchemy `Column` objects and uses them directly
-2. Creates query builder Column descriptors for fluent syntax
-3. Registers tables to metadata for alembic
-
-This means:
-- Alembic autogenerate works perfectly
-- Query builder gives you type-safe queries
-- Single source of truth for your schema
-- SQLAlchemy is optional - query builder works standalone
-
-# Note on usage
-
-This library should ideally be used inside middleware or library code
-right before making an actual query. It can be used to enforce
-using t-strings and prevent using raw strings.
-
-For example:
-
+class Events(Table, metadata=metadata):
+    id = Column(String, primary_key=True)
+    topic: Column  # Simple annotation - becomes nullable String column
+    created_at = Column(DateTime, server_default=now())
 ```
+
+## Schema Support
+
+```python
+class Users(Table, schema='public'):
+    id: Column
+    name: Column
+```
+
+Or with custom table name and schema:
+
+```python
+class Users(Table, table_name='user_accounts', schema='public'):
+    id: Column
+    name: Column
+```
+
+# Note on Usage
+
+This library should ideally be used in middleware or library code right before making a query. It can enforce the use of t-strings and prevent raw strings:
+
+```python
 from string.templatelib import Template
-
 import tsql
 
 def execute_sql_query(query):
     if not isinstance(query, Template):
         raise TypeError('Cannot make a query without using t-strings')
-        
-    
-    return sql_engine.execute(*tsql.render(query))
 
+    return sql_engine.execute(*tsql.render(query))
 ```

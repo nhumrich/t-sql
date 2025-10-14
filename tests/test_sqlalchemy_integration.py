@@ -1,5 +1,5 @@
 import tsql
-from tsql.query_builder import table
+from tsql.query_builder import Table
 from sqlalchemy import MetaData, Column, String, Integer, Boolean, ForeignKey, TIMESTAMP, TypeDecorator
 from sqlalchemy.sql.functions import now
 from sqlalchemy.dialects.postgresql import JSONB
@@ -10,18 +10,17 @@ def test_table_with_simple_annotations():
     """Test that simple type annotations create SA tables"""
     metadata = MetaData()
 
-    @table('users', metadata=metadata)
-    class Users:
+    class Users(Table, table_name='users', metadata=metadata):
         id: int
         name: str
         age: int
 
-    # Decorator returns instance, not class
-    assert hasattr(Users.__class__, '_sa_table')
-    assert Users.__class__._sa_table.name == 'users'
-    assert 'id' in Users.__class__._sa_table.c
-    assert 'name' in Users.__class__._sa_table.c
-    assert Users.__class__._sa_table in metadata.tables.values()
+    # Decorator returns class with _sa_table
+    assert hasattr(Users, '_sa_table')
+    assert Users._sa_table.name == 'users'
+    assert 'id' in Users._sa_table.c
+    assert 'name' in Users._sa_table.c
+    assert Users._sa_table in metadata.tables.values()
 
     # Query builder works directly
     query = Users.select(Users.name).where(Users.age > 18)
@@ -32,12 +31,11 @@ def test_table_with_simple_annotations():
 
 def test_table_without_metadata():
     """Test that @table works without metadata (query builder only)"""
-    @table('posts')
-    class Posts:
+    class Posts(Table, table_name='posts'):
         id: int
         title: str
 
-    assert not hasattr(Posts.__class__, '_sa_table')
+    assert not hasattr(Posts, '_sa_table')
     assert Posts.id.table_name == 'posts'
 
     # Query builder still works
@@ -50,11 +48,10 @@ def test_schema_support():
     """Test that schema parameter works"""
     metadata = MetaData()
 
-    @table('users', metadata=metadata, schema='public')
-    class Users:
+    class Users(Table, table_name='users', metadata=metadata, schema='public'):
         id: int
 
-    assert Users.__class__._sa_table.schema == 'public'
+    assert Users._sa_table.schema == 'public'
     assert Users.schema == 'public'
 
 
@@ -62,8 +59,7 @@ def test_using_sqlalchemy_column_directly():
     """Test using SQLAlchemy Column objects directly"""
     metadata = MetaData()
 
-    @table('users', metadata=metadata)
-    class Users:
+    class Users(Table, table_name='users', metadata=metadata):
         id = Column(String, primary_key=True, index=True)
         name = Column(String(255), nullable=False)
         age = Column(Integer, nullable=True)
@@ -91,8 +87,7 @@ def test_mixed_column_definitions():
     """Test mixing type annotations and SA Column objects"""
     metadata = MetaData()
 
-    @table('posts', metadata=metadata)
-    class Posts:
+    class Posts(Table, table_name='posts', metadata=metadata):
         # Using SA Column for complex types
         id = Column(String, primary_key=True, default=lambda: 'generated_id')
         # Simple type annotation
@@ -120,12 +115,10 @@ def test_sa_column_with_foreign_key():
     """Test SA Column with ForeignKey"""
     metadata = MetaData()
 
-    @table('users', metadata=metadata)
-    class Users:
+    class Users(Table, table_name='users', metadata=metadata):
         id = Column(String, primary_key=True)
 
-    @table('posts', metadata=metadata)
-    class Posts:
+    class Posts(Table, table_name='posts', metadata=metadata):
         id = Column(String, primary_key=True)
         user_id = Column(String, ForeignKey('users.id', ondelete='CASCADE'), index=True)
         title = Column(String(500))
@@ -150,8 +143,7 @@ def test_sa_column_with_custom_type():
 
     metadata = MetaData()
 
-    @table('test', metadata=metadata)
-    class TestTable:
+    class TestTable(Table, table_name='test', metadata=metadata):
         id = Column(Integer, primary_key=True)
         custom_field = Column(CustomType)
         json_field = Column(JSONB)
@@ -170,12 +162,10 @@ def test_complex_real_world_example():
     """Test a complex real-world table definition"""
     metadata = MetaData()
 
-    @table('users', metadata=metadata)
-    class Users:
+    class Users(Table, table_name='users', metadata=metadata):
         id = Column(String, primary_key=True)
 
-    @table('comments', metadata=metadata)
-    class Comments:
+    class Comments(Table, table_name='comments', metadata=metadata):
         id = Column(String, primary_key=True, default=lambda: gen_id('c'))
         post_id = Column(String, ForeignKey('posts.id', ondelete='CASCADE'), index=True)
         user_id = Column(String, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
@@ -206,8 +196,7 @@ def test_mixing_query_builder_with_tsql():
     """Test mixing query builder with raw t-string conditions"""
     metadata = MetaData()
 
-    @table('users', metadata=metadata)
-    class Users:
+    class Users(Table, table_name='users', metadata=metadata):
         id = Column(String, primary_key=True)
         name = Column(String)
         age = Column(Integer)

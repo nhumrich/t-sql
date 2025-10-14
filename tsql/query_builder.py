@@ -1,9 +1,8 @@
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Union, ClassVar
 from string.templatelib import Template
-from functools import wraps
 from datetime import datetime
 
-from tsql import TSQL, t_join, insert as tsql_insert, upsert as tsql_upsert, delete as tsql_delete, as_set
+from tsql import TSQL, t_join
 
 # Optional SQLAlchemy support
 try:
@@ -19,16 +18,36 @@ except ImportError:
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
-    def __init__(self, table_name: str, column_name: str, python_type: type = None):
+    def __init__(self, table_name: str, column_name: str, python_type: type = None, alias: str = None):
         self.table_name = table_name
         self.column_name = column_name
         self.python_type = python_type
+        self.alias = alias
 
     def __str__(self) -> str:
-        return f"{self.table_name}.{self.column_name}"
+        base = f"{self.table_name}.{self.column_name}"
+        if self.alias:
+            return f"{base} AS {self.alias}"
+        return base
 
     def __repr__(self) -> str:
+        if self.alias:
+            return f"Column({self.table_name!r}, {self.column_name!r}, alias={self.alias!r})"
         return f"Column({self.table_name!r}, {self.column_name!r})"
+
+    def as_(self, alias: str) -> 'Column':
+        """Create a new Column with an alias for use in SELECT clauses
+
+        Args:
+            alias: The alias name for this column
+
+        Returns:
+            A new Column object with the alias set
+
+        Example:
+            users.select(users.first_name.as_('first'), users.last_name.as_('last'))
+        """
+        return Column(self.table_name, self.column_name, self.python_type, alias)
 
     def __eq__(self, other) -> 'Condition':
         if other is None:
@@ -52,17 +71,223 @@ class Column:
     def __ge__(self, other) -> 'Condition':
         return Condition(self, '>=', other)
 
-    def in_(self, values: list) -> 'Condition':
-        """Create an IN condition"""
-        return Condition(self, 'IN', tuple(values))
+    def in_(self, values: Union[list, tuple, 'Column', Template, 'QueryBuilder']) -> 'Condition':
+        """Create an IN condition
+
+        Args:
+            values: List/tuple of values, a Column, a Template (t-string), or a QueryBuilder for subqueries
+        """
+        if isinstance(values, (list, tuple)):
+            return Condition(self, 'IN', tuple(values))
+        return Condition(self, 'IN', values)
+
+    def not_in(self, values: Union[list, tuple, 'Column', Template, 'QueryBuilder']) -> 'Condition':
+        """Create a NOT IN condition
+
+        Args:
+            values: List/tuple of values, a Column, a Template (t-string), or a QueryBuilder for subqueries
+        """
+        if isinstance(values, (list, tuple)):
+            return Condition(self, 'NOT IN', tuple(values))
+        return Condition(self, 'NOT IN', values)
 
     def like(self, pattern: str) -> 'Condition':
         """Create a LIKE condition"""
         return Condition(self, 'LIKE', pattern)
 
+    def not_like(self, pattern: str) -> 'Condition':
+        """Create a NOT LIKE condition"""
+        return Condition(self, 'NOT LIKE', pattern)
+
+    def ilike(self, pattern: str) -> 'Condition':
+        """Create an ILIKE condition (case-insensitive, PostgreSQL/SQLite only)"""
+        return Condition(self, 'ILIKE', pattern)
+
+    def not_ilike(self, pattern: str) -> 'Condition':
+        """Create a NOT ILIKE condition (case-insensitive, PostgreSQL/SQLite only)"""
+        return Condition(self, 'NOT ILIKE', pattern)
+
+    def between(self, start: Any, end: Any) -> 'Condition':
+        """Create a BETWEEN condition
+
+        Args:
+            start: Lower bound value
+            end: Upper bound value
+        """
+        return Condition(self, 'BETWEEN', (start, end))
+
+    def not_between(self, start: Any, end: Any) -> 'Condition':
+        """Create a NOT BETWEEN condition
+
+        Args:
+            start: Lower bound value
+            end: Upper bound value
+        """
+        return Condition(self, 'NOT BETWEEN', (start, end))
+
+    @property
+    def is_null(self) -> 'Condition':
+        """Create an IS NULL condition"""
+        return Condition(self, 'IS', None)
+
+    @property
+    def is_not_null(self) -> 'Condition':
+        """Create an IS NOT NULL condition"""
+        return Condition(self, 'IS NOT', None)
+
+
+class Table:
+    """Base class for all table definitions. Provides query builder methods.
+
+    Inherit from this class to define a table:
+
+        class Users(Table):
+            id: Column
+            name: Column
+            email: Column
+
+    The table name defaults to the lowercase class name. To specify a custom name:
+
+        class Users(Table, table_name='user_accounts'):
+            id: Column
+
+    For SQLAlchemy integration, use SQLAlchemy Column objects:
+
+        from sqlalchemy import Column, Integer, String
+
+        class Users(Table, metadata=metadata, schema='public'):
+            id = Column(Integer, primary_key=True)
+            name = Column(String(100))
+    """
+    table_name: ClassVar[str]
+    schema: ClassVar[Optional[str]] = None
+
+    def __init_subclass__(cls, table_name: Optional[str] = None, metadata: Optional[Any] = None, schema: Optional[str] = None, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # Set table_name: use provided name, or default to lowercase class name
+        cls.table_name = table_name if table_name is not None else cls.__name__.lower()
+        cls.schema = schema
+
+        annotations = getattr(cls, '__annotations__', {})
+        sa_columns = []
+
+        # Collect all potential column fields
+        all_fields = {}
+
+        # First, get annotated fields
+        for field_name, field_type in annotations.items():
+            all_fields[field_name] = {
+                'type': field_type,
+                'value': getattr(cls, field_name, None)
+            }
+
+        # Then, check for Ellipsis (...) assignments and SA Columns
+        for field_name in dir(cls):
+            if field_name.startswith('_'):
+                continue
+            field_value = getattr(cls, field_name, None)
+
+            # Check for Ellipsis syntax: id = ...
+            if field_value is ...:
+                if field_name not in all_fields:
+                    all_fields[field_name] = {
+                        'type': None,
+                        'value': ...
+                    }
+            # Check for SQLAlchemy Column objects
+            elif HAS_SQLALCHEMY and isinstance(field_value, SAColumnType):
+                if field_name not in all_fields:
+                    all_fields[field_name] = {
+                        'type': None,
+                        'value': field_value
+                    }
+
+        # Process all fields
+        for field_name, field_info in all_fields.items():
+            field_type = field_info['type']
+            field_value = field_info['value']
+
+            # Check if it's a SQLAlchemy Column object
+            if HAS_SQLALCHEMY and isinstance(field_value, SAColumnType):
+                # Use the SA Column directly
+                if metadata is not None:
+                    # Make a copy of the column with the field name
+                    sa_col = field_value._copy()
+                    sa_col.name = field_name
+                    sa_columns.append(sa_col)
+
+                # Create query builder ColumnDescriptor
+                setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
+                continue
+
+            # Check if it's an Ellipsis (...) declaration
+            if field_value is ...:
+                # Create query builder ColumnDescriptor
+                setattr(cls, field_name, ColumnDescriptor(field_name, None))
+                continue
+
+            # Otherwise, handle type annotations
+            if field_type is None:
+                # No type annotation, Ellipsis, or SA Column - skip
+                continue
+
+            # Create query builder ColumnDescriptor for type-annotated fields
+            setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
+
+            # Create SQLAlchemy column if metadata provided
+            if metadata is not None and HAS_SQLALCHEMY:
+                sa_type = PYTHON_TO_SA.get(field_type, String)()
+                sa_columns.append(SAColumn(field_name, sa_type))
+
+        # Create SQLAlchemy Table if metadata provided
+        if metadata is not None and HAS_SQLALCHEMY:
+            cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, schema=schema)
+
+    @classmethod
+    def select(cls, *columns: Union['Column', Template]) -> 'QueryBuilder':
+        """Start building a SELECT query"""
+        builder = QueryBuilder(cls)
+        if columns:
+            builder.select(*columns)
+        return builder
+
+    @classmethod
+    def insert(cls, values: dict[str, Any]) -> 'InsertBuilder':
+        """Start building an INSERT query
+
+        Args:
+            values: Dictionary of column names and values
+
+        Returns:
+            InsertBuilder for adding conflict handling and RETURNING
+        """
+        return InsertBuilder(cls, values)
+
+    @classmethod
+    def update(cls, values: dict[str, Any]) -> 'UpdateBuilder':
+        """Start building an UPDATE query
+
+        Args:
+            values: Dictionary of column names and values to update
+
+        Returns:
+            UpdateBuilder for adding WHERE conditions
+        """
+        return UpdateBuilder(cls, values)
+
+    @classmethod
+    def delete(cls) -> 'DeleteBuilder':
+        """Start building a DELETE query
+
+        Returns:
+            DeleteBuilder for adding WHERE conditions
+        """
+        return DeleteBuilder(cls)
+
 
 class ColumnDescriptor:
-    """Descriptor that creates Column objects when accessed on Table instances"""
+    """Descriptor that creates Column objects when accessed on Table classes or instances"""
 
     def __init__(self, column_name: str, python_type: type = None):
         self.column_name = column_name
@@ -71,10 +296,10 @@ class ColumnDescriptor:
     def __set_name__(self, owner, name):
         self.column_name = name
 
-    def __get__(self, obj, objtype=None):
-        if obj is None:
-            return self
-        return Column(obj.table_name, self.column_name, self.python_type)
+    def __get__(self, obj, objtype=None) -> Column:
+        if objtype is None:
+            objtype = type(obj)
+        return Column(objtype.table_name, self.column_name, self.python_type)
 
 
 class Condition:
@@ -89,24 +314,49 @@ class Condition:
         """Convert condition to a t-string fragment"""
         left_str = str(self.left)
 
+        # Handle NULL checks
         if self.right is None:
             null_str = f"{left_str} {self.operator} NULL"
             return t'{null_str:unsafe}'
 
-        if self.operator == 'IN':
-            right_val = self.right
-            return t'{left_str:unsafe} {self.operator:unsafe} {right_val}'
+        # Match on operator type
+        match self.operator:
+            case 'IN' | 'NOT IN':
+                # Check if it's a QueryBuilder (subquery)
+                if hasattr(self.right, 'to_tsql'):
+                    subquery_tsql = self.right.to_tsql()
+                    return t'{left_str:unsafe} {self.operator:unsafe} ({subquery_tsql})'
+                # Check if it's a Template (raw t-string)
+                elif isinstance(self.right, Template):
+                    return t'{left_str:unsafe} {self.operator:unsafe} {self.right}'
+                # Check if it's a Column
+                elif isinstance(self.right, Column):
+                    right_str = str(self.right)
+                    return t'{left_str:unsafe} {self.operator:unsafe} ({right_str:unsafe})'
+                # Otherwise it's a tuple/list of values
+                else:
+                    right_val = self.right
+                    return t'{left_str:unsafe} {self.operator:unsafe} {right_val}'
 
-        if isinstance(self.right, Column):
-            right_str = str(self.right)
-            col_comparison = f"{left_str} {self.operator} {right_str}"
-            return t'{col_comparison:unsafe}'
+            case 'BETWEEN' | 'NOT BETWEEN':
+                if isinstance(self.right, tuple) and len(self.right) == 2:
+                    start, end = self.right
+                    return t'{left_str:unsafe} {self.operator:unsafe} {start} AND {end}'
+                else:
+                    raise ValueError(f"{self.operator} requires a tuple of (start, end)")
 
-        if isinstance(self.right, Template):
-            return t'{left_str:unsafe} {self.operator:unsafe} {self.right}'
+            case _:
+                # Default handling for other operators
+                if isinstance(self.right, Column):
+                    right_str = str(self.right)
+                    col_comparison = f"{left_str} {self.operator} {right_str}"
+                    return t'{col_comparison:unsafe}'
 
-        right_val = self.right
-        return t'{left_str:unsafe} {self.operator:unsafe} {right_val}'
+                if isinstance(self.right, Template):
+                    return t'{left_str:unsafe} {self.operator:unsafe} {self.right}'
+
+                right_val = self.right
+                return t'{left_str:unsafe} {self.operator:unsafe} {right_val}'
 
     def __repr__(self) -> str:
         return f"Condition({self.left!r}, {self.operator!r}, {self.right!r})"
@@ -128,6 +378,151 @@ class Join:
         return t'{join_type:unsafe} JOIN {table_name:literal} ON {condition_tsql}'
 
 
+class InsertBuilder:
+    """Fluent interface for building INSERT queries"""
+
+    def __init__(self, base_table: 'Table', values: dict[str, Any]):
+        self.base_table = base_table
+        self.values = values
+        self._ignore = False
+        self._on_conflict_action: Optional[str] = None
+        self._conflict_cols: Optional[List[str]] = None
+        self._update_cols: Optional[dict[str, Any]] = None
+        self._returning_cols: Optional[List[str]] = None
+
+    def ignore(self) -> 'InsertBuilder':
+        """Add INSERT IGNORE (MySQL)"""
+        self._ignore = True
+        return self
+
+    def on_conflict_do_nothing(self, conflict_on: Optional[Union[str, List[str]]] = None) -> 'InsertBuilder':
+        """Add ON CONFLICT DO NOTHING (Postgres/SQLite)
+
+        Args:
+            conflict_on: Optional column name(s) for conflict target
+        """
+        self._on_conflict_action = 'nothing'
+        if conflict_on:
+            self._conflict_cols = [conflict_on] if isinstance(conflict_on, str) else conflict_on
+        return self
+
+    def on_conflict_update(self, conflict_on: Union[str, List[str]], update: Optional[dict[str, Any]] = None) -> 'InsertBuilder':
+        """Add ON CONFLICT DO UPDATE (Postgres/SQLite)
+
+        Args:
+            conflict_on: Column name(s) that define the conflict constraint
+            update: Optional dict of columns to update (defaults to all non-conflict columns using EXCLUDED.*)
+        """
+        self._on_conflict_action = 'update'
+        self._conflict_cols = [conflict_on] if isinstance(conflict_on, str) else conflict_on
+        self._update_cols = update
+        return self
+
+    def on_duplicate_key_update(self, update: Optional[dict[str, Any]] = None) -> 'InsertBuilder':
+        """Add ON DUPLICATE KEY UPDATE (MySQL)
+
+        Args:
+            update: Optional dict of columns to update (defaults to all columns using VALUES(*))
+        """
+        self._on_conflict_action = 'duplicate_key'
+        self._update_cols = update
+        return self
+
+    def returning(self, *columns: str) -> 'InsertBuilder':
+        """Add RETURNING clause (Postgres/SQLite only)
+
+        Args:
+            columns: Column names to return, or none for RETURNING *
+        """
+        self._returning_cols = list(columns) if columns else ['*']
+        return self
+
+    def to_tsql(self) -> TSQL:
+        """Build the final TSQL object"""
+        parts: List[Template] = []
+
+        table_name = self.base_table.table_name
+        values_dict = self.values
+
+        # MySQL INSERT IGNORE
+        if self._ignore:
+            parts.append(t'INSERT IGNORE INTO {table_name:literal} {values_dict:as_values}')
+        else:
+            parts.append(t'INSERT INTO {table_name:literal} {values_dict:as_values}')
+
+        # Add alias for ON DUPLICATE KEY UPDATE if needed
+        if self._on_conflict_action == 'duplicate_key':
+            parts.append(t'AS new')
+
+        # ON CONFLICT clauses (Postgres/SQLite)
+        if self._on_conflict_action == 'nothing':
+            if self._conflict_cols:
+                conflict_cols_str = ', '.join(self._conflict_cols)
+                parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO NOTHING')
+            else:
+                parts.append(t'ON CONFLICT DO NOTHING')
+        elif self._on_conflict_action == 'update':
+            conflict_cols_str = ', '.join(self._conflict_cols)
+
+            # Build UPDATE SET clause
+            if self._update_cols:
+                # User specified which columns to update
+                update_dict = self._update_cols
+                parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO UPDATE SET {update_dict:as_set}')
+            else:
+                # Default: update all non-conflict columns with EXCLUDED.*
+                update_parts = []
+                for i, key in enumerate(self.values.keys()):
+                    if key not in self._conflict_cols:
+                        if i > 0 and update_parts:
+                            update_parts.append(', ')
+                        update_parts.append(f'{key} = EXCLUDED.{key}')
+
+                if update_parts:
+                    update_str = ''.join(update_parts)
+                    parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO UPDATE SET {update_str:unsafe}')
+                else:
+                    # All columns are conflict columns, just do nothing
+                    parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO NOTHING')
+
+        # MySQL ON DUPLICATE KEY UPDATE
+        elif self._on_conflict_action == 'duplicate_key':
+            if self._update_cols:
+                update_dict = self._update_cols
+                parts.append(t'ON DUPLICATE KEY UPDATE {update_dict:as_set}')
+            else:
+                # Default: update all columns with alias.column (new MySQL syntax)
+                update_parts = []
+                for i, key in enumerate(self.values.keys()):
+                    if i > 0:
+                        update_parts.append(', ')
+                    update_parts.append(f'{key} = new.{key}')
+
+                update_str = ''.join(update_parts)
+                parts.append(t'ON DUPLICATE KEY UPDATE {update_str:unsafe}')
+
+        # RETURNING clause
+        if self._returning_cols is not None:
+            returning_str = ', '.join(self._returning_cols)
+            parts.append(t'RETURNING {returning_str:unsafe}')
+
+        return TSQL(t_join(t' ', parts))
+
+    def render(self, style=None):
+        """Convenience method to render the query directly"""
+        return self.to_tsql().render(style)
+
+    def __repr__(self) -> str:
+        """Show the rendered SQL query for debugging"""
+        try:
+            query, params = self.to_tsql().render()
+            if params:
+                return f"InsertBuilder(\n  SQL: {query}\n  Params: {params}\n)"
+            return f"InsertBuilder({query})"
+        except Exception as e:
+            return f"InsertBuilder(<error rendering: {e}>)"
+
+
 class UpdateBuilder:
     """Fluent interface for building UPDATE queries"""
 
@@ -135,10 +530,20 @@ class UpdateBuilder:
         self.base_table = base_table
         self.values = values
         self._conditions: List[Union[Condition, Template]] = []
+        self._returning_cols: Optional[List[str]] = None
 
     def where(self, condition: Union[Condition, Template]) -> 'UpdateBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
         self._conditions.append(condition)
+        return self
+
+    def returning(self, *columns: str) -> 'UpdateBuilder':
+        """Add RETURNING clause (Postgres/SQLite only)
+
+        Args:
+            columns: Column names to return, or none for RETURNING *
+        """
+        self._returning_cols = list(columns) if columns else ['*']
         return self
 
     def to_tsql(self) -> TSQL:
@@ -159,7 +564,9 @@ class UpdateBuilder:
             combined_where = t_join(t' AND ', where_parts)
             parts.append(t'WHERE {combined_where}')
 
-        parts.append(t'RETURNING *')
+        if self._returning_cols is not None:
+            returning_str = ', '.join(self._returning_cols)
+            parts.append(t'RETURNING {returning_str:unsafe}')
 
         return TSQL(t_join(t' ', parts))
 
@@ -184,10 +591,20 @@ class DeleteBuilder:
     def __init__(self, base_table: 'Table'):
         self.base_table = base_table
         self._conditions: List[Union[Condition, Template]] = []
+        self._returning_cols: Optional[List[str]] = None
 
     def where(self, condition: Union[Condition, Template]) -> 'DeleteBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
         self._conditions.append(condition)
+        return self
+
+    def returning(self, *columns: str) -> 'DeleteBuilder':
+        """Add RETURNING clause (Postgres/SQLite only)
+
+        Args:
+            columns: Column names to return, or none for RETURNING *
+        """
+        self._returning_cols = list(columns) if columns else ['*']
         return self
 
     def to_tsql(self) -> TSQL:
@@ -207,7 +624,9 @@ class DeleteBuilder:
             combined_where = t_join(t' AND ', where_parts)
             parts.append(t'WHERE {combined_where}')
 
-        parts.append(t'RETURNING *')
+        if self._returning_cols is not None:
+            returning_str = ', '.join(self._returning_cols)
+            parts.append(t'RETURNING {returning_str:unsafe}')
 
         return TSQL(t_join(t' ', parts))
 
@@ -240,8 +659,22 @@ class QueryBuilder:
         self._limit_value: Optional[int] = None
         self._offset_value: Optional[int] = None
 
-    def select(self, *columns: Column) -> 'QueryBuilder':
-        """Specify columns to select"""
+    def select(self, *columns: Union[Column, Template]) -> 'QueryBuilder':
+        """Specify columns to select
+
+        Args:
+            columns: Column objects (optionally with .as_() aliases) or raw t-string Templates
+
+        Examples:
+            # Using Column.as_() for aliases
+            users.select(users.first_name.as_('first'), users.last_name.as_('last'))
+
+            # Mixing Column objects and raw t-strings
+            users.select(users.id, users.email, t'users.first_name AS first')
+
+            # No columns specified selects all (SELECT *)
+            users.select()
+        """
         self._columns = list(columns) if columns else None
         return self
 
@@ -303,9 +736,17 @@ class QueryBuilder:
         parts: List[Template] = []
 
         if self._columns:
-            column_names = [str(col) for col in self._columns]
-            columns_str = ', '.join(column_names)
-            parts.append(t'SELECT {columns_str:unsafe}')
+            # Build column list, handling both Column objects and Template (t-string) objects
+            column_parts = []
+            for col in self._columns:
+                if isinstance(col, Template):
+                    column_parts.append(col)
+                else:
+                    # Column object, convert to string
+                    column_parts.append(t'{str(col):unsafe}')
+
+            columns_template = t_join(t', ', column_parts)
+            parts.append(t'SELECT {columns_template}')
         else:
             parts.append(t'SELECT *')
 
@@ -379,154 +820,3 @@ if HAS_SQLALCHEMY:
         datetime: DateTime,
         float: Float,
     }
-
-
-def table(name: str, *, metadata: Optional[Any] = None, schema: Optional[str] = None):
-    """Decorator to define a table with columns
-
-    Args:
-        name: Table name
-        metadata: SQLAlchemy MetaData object for alembic integration (optional)
-        schema: Database schema name (optional)
-
-    Supports two ways to define columns:
-    1. Type annotations: `id: int` (creates basic nullable column)
-    2. SQLAlchemy Column: `id = Column(String, primary_key=True)` (full SA support)
-    """
-    def decorator(cls):
-        cls.table_name = name
-        cls.schema = schema
-
-        annotations = getattr(cls, '__annotations__', {})
-        sa_columns = []
-
-        # Collect all potential column fields
-        all_fields = {}
-
-        # First, get annotated fields
-        for field_name, field_type in annotations.items():
-            all_fields[field_name] = {
-                'type': field_type,
-                'value': getattr(cls, field_name, None)
-            }
-
-        # Then, add any SA Column attributes that weren't annotated
-        if HAS_SQLALCHEMY:
-            for field_name in dir(cls):
-                if field_name.startswith('_'):
-                    continue
-                field_value = getattr(cls, field_name, None)
-                if isinstance(field_value, SAColumnType):
-                    if field_name not in all_fields:
-                        all_fields[field_name] = {
-                            'type': None,
-                            'value': field_value
-                        }
-
-        # Process all fields
-        for field_name, field_info in all_fields.items():
-            field_type = field_info['type']
-            field_value = field_info['value']
-
-            # Check if it's a SQLAlchemy Column object
-            if HAS_SQLALCHEMY and isinstance(field_value, SAColumnType):
-                # Use the SA Column directly
-                if metadata is not None:
-                    # Make a copy of the column with the field name
-                    sa_col = field_value._copy()
-                    sa_col.name = field_name
-                    sa_columns.append(sa_col)
-
-                # Create query builder ColumnDescriptor
-                setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
-                continue
-
-            # Otherwise, handle type annotations with helper classes
-            if field_type is None:
-                # No type annotation and not a SA Column, skip
-                continue
-
-            # Create query builder ColumnDescriptor
-            setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
-
-            # Create SQLAlchemy column if metadata provided
-            if metadata is not None and HAS_SQLALCHEMY:
-                sa_type = PYTHON_TO_SA.get(field_type, String)()
-                sa_columns.append(SAColumn(field_name, sa_type))
-
-        # Create SQLAlchemy Table if metadata provided
-        if metadata is not None and HAS_SQLALCHEMY:
-            cls._sa_table = SATable(name, metadata, *sa_columns, schema=schema)
-
-        original_init = cls.__init__ if hasattr(cls, '__init__') else lambda self: None
-
-        def new_init(self):
-            original_init(self)
-
-        cls.__init__ = new_init
-
-        def select(self, *columns: Column) -> QueryBuilder:
-            """Start building a SELECT query"""
-            builder = QueryBuilder(self)
-            if columns:
-                builder.select(*columns)
-            return builder
-
-        def insert(self, values: dict[str, Any], ignore_conflict: bool = False) -> TSQL:
-            """Insert a row into the table
-
-            Args:
-                values: Dictionary of column names and values
-                ignore_conflict: If True, adds ON CONFLICT DO NOTHING
-
-            Returns:
-                TSQL object representing the INSERT query
-            """
-            return tsql_insert(self.table_name, values, ignore_conflict=ignore_conflict)
-
-        def upsert(self, values: dict[str, Any], conflict_on: str | list[str] | Column | list[Column]) -> TSQL:
-            """Upsert (INSERT ... ON CONFLICT DO UPDATE) a row
-
-            Args:
-                values: Dictionary of column names and values
-                conflict_on: Column name(s) or Column object(s) that define the conflict constraint
-
-            Returns:
-                TSQL object representing the UPSERT query
-            """
-            # Convert Column objects to strings
-            if isinstance(conflict_on, Column):
-                conflict_on = conflict_on.column_name
-            elif isinstance(conflict_on, list):
-                conflict_on = [col.column_name if isinstance(col, Column) else col for col in conflict_on]
-
-            return tsql_upsert(self.table_name, values, conflict_on=conflict_on)
-
-        def update(self, values: dict[str, Any]) -> UpdateBuilder:
-            """Start building an UPDATE query
-
-            Args:
-                values: Dictionary of column names and values to update
-
-            Returns:
-                UpdateBuilder for adding WHERE conditions
-            """
-            return UpdateBuilder(self, values)
-
-        def delete(self) -> DeleteBuilder:
-            """Start building a DELETE query
-
-            Returns:
-                DeleteBuilder for adding WHERE conditions
-            """
-            return DeleteBuilder(self)
-
-        cls.select = select
-        cls.insert = insert
-        cls.upsert = upsert
-        cls.update = update
-        cls.delete = delete
-
-        # Return an instance instead of the class
-        return cls()
-    return decorator

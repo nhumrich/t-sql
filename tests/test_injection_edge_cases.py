@@ -159,3 +159,116 @@ def test_unsafe_parameter_injection():
     # Test ESCAPED style with :unsafe (should behave the same)
     result_escaped = tsql.render(t"SELECT * FROM users WHERE debug = {malicious_value:unsafe}", style=tsql.styles.ESCAPED)
     assert "DROP TABLE users" in result_escaped[0]  # Should be directly embedded
+
+
+def test_dictionary_key_injection_as_values():
+    """Test that malicious dictionary keys in :as_values are rejected"""
+    # Classic SQL injection in dictionary key
+    malicious_dict = {
+        "name); DROP TABLE users; --": "value"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"INSERT INTO users {malicious_dict:as_values}")
+
+    # Semicolon in key
+    malicious_dict2 = {
+        "name; DELETE FROM users": "value"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"INSERT INTO users {malicious_dict2:as_values}")
+
+    # Quote in key
+    malicious_dict3 = {
+        "name' OR '1'='1": "value"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"INSERT INTO users {malicious_dict3:as_values}")
+
+    # Comment in key
+    malicious_dict4 = {
+        "name--": "value"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"INSERT INTO users {malicious_dict4:as_values}")
+
+
+def test_dictionary_key_injection_as_set():
+    """Test that malicious dictionary keys in :as_set are rejected"""
+    # Classic injection attempt in UPDATE
+    malicious_dict = {
+        "email = 'hacker@evil.com' WHERE 1=1; --": "value"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"UPDATE users SET {malicious_dict:as_set} WHERE id = 1")
+
+    # Another variant
+    malicious_dict2 = {
+        "role = 'admin'--": "user"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"UPDATE users SET {malicious_dict2:as_set} WHERE id = 1")
+
+
+def test_empty_dictionary_as_values():
+    """Test that empty dictionaries are rejected in :as_values"""
+    empty_dict = {}
+
+    with pytest.raises(ValueError, match="at least one column"):
+        tsql.render(t"INSERT INTO users {empty_dict:as_values}")
+
+
+def test_empty_dictionary_as_set():
+    """Test that empty dictionaries are rejected in :as_set"""
+    empty_dict = {}
+
+    with pytest.raises(ValueError, match="at least one column"):
+        tsql.render(t"UPDATE users SET {empty_dict:as_set} WHERE id = 1")
+
+
+def test_non_string_dictionary_keys():
+    """Test that non-string dictionary keys are rejected"""
+    # Integer key
+    int_key_dict = {
+        123: "value"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"INSERT INTO users {int_key_dict:as_values}")
+
+    # Tuple key
+    tuple_key_dict = {
+        ("name", "value"): "test"
+    }
+
+    with pytest.raises(ValueError, match="Invalid column name"):
+        tsql.render(t"INSERT INTO users {tuple_key_dict:as_values}")
+
+
+def test_valid_dictionary_keys_still_work():
+    """Test that valid identifiers still work in dictionaries"""
+    # Simple identifier
+    valid_dict = {
+        "name": "Alice",
+        "age": 30
+    }
+
+    result = tsql.render(t"INSERT INTO users {valid_dict:as_values}")
+    assert "(name, age) VALUES (?, ?)" in result[0]
+    assert result[1] == ["Alice", 30]
+
+    # Valid identifiers with underscores
+    valid_dict2 = {
+        "first_name": "Bob",
+        "last_name": "Smith"
+    }
+
+    result2 = tsql.render(t"UPDATE users SET {valid_dict2:as_set} WHERE id = 1")
+    assert "first_name = ?" in result2[0]
+    assert "last_name = ?" in result2[0]
+    assert result2[1] == ["Bob", "Smith"]

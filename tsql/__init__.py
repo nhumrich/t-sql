@@ -150,8 +150,16 @@ def t_join(part: Template, collection: Iterable[Template|TSQL]):
 
 def as_values(value_dict: dict[str, Any]):
     """Convert a dictionary to SQL column list and VALUES clause"""
+    if not value_dict:
+        raise ValueError("as_values requires at least one column-value pair")
+
     keys = list(value_dict.keys())
     values = list(value_dict.values())
+
+    # Validate all keys are valid identifiers
+    for key in keys:
+        if not isinstance(key, str) or not key.isidentifier():
+            raise ValueError(f"Invalid column name: {key!r}")
 
     # Build column list: (col1, col2, col3)
     column_parts = ['(']
@@ -177,8 +185,16 @@ def as_values(value_dict: dict[str, Any]):
 
 def as_set(value_dict: dict[str, Any]):
     """Convert a dictionary to SQL SET clause for UPDATE statements"""
+    if not value_dict:
+        raise ValueError("as_set requires at least one column-value pair")
+
     keys = list(value_dict.keys())
     values = list(value_dict.values())
+
+    # Validate all keys are valid identifiers
+    for key in keys:
+        if not isinstance(key, str) or not key.isidentifier():
+            raise ValueError(f"Invalid column name: {key!r}")
 
     # Build SET clause: col1 = ?, col2 = ?, col3 = ?
     set_parts = []

@@ -149,8 +149,7 @@ sql, params = query.render()
 Quick INSERT queries:
 
 ```python
-values = {'id': 'abc123', 'name': 'bob', 'email': 'bob@example.com'}
-query = tsql.insert('users', values)
+query = tsql.insert('users', id='abc123', name='bob', email='bob@example.com')
 sql, params = query.render()
 # ('INSERT INTO users (id, name, email) VALUES (?, ?, ?)', ['abc123', 'bob', 'bob@example.com'])
 ```
@@ -161,14 +160,9 @@ Quick UPDATE queries:
 
 ```python
 # Update by ID
-query = tsql.update('users', {'email': 'new@example.com'}, id_value='abc123')
+query = tsql.update('users', 'abc123', email='new@example.com')
 sql, params = query.render()
 # ('UPDATE users SET email = ? WHERE id = ?', ['new@example.com', 'abc123'])
-
-# Update with custom WHERE
-query = tsql.update('users', {'email': 'new@example.com'}, where={'age': 25})
-sql, params = query.render()
-# ('UPDATE users SET email = ? WHERE age = ?', ['new@example.com', 25])
 ```
 
 #### delete
@@ -281,47 +275,46 @@ The query builder supports INSERT, UPDATE, and DELETE with database-agnostic con
 
 ```python
 # Basic insert
-values = {'id': 'abc123', 'username': 'john', 'email': 'john@example.com'}
-query = Users.insert(values)
+query = Users.insert(id='abc123', username='john', email='john@example.com')
 sql, params = query.render()
 # ('INSERT INTO users (id, username, email) VALUES (?, ?, ?)', ['abc123', 'john', 'john@example.com'])
 
 # INSERT with RETURNING (Postgres/SQLite)
-query = Users.insert(values).returning()
+query = Users.insert(id='abc123', username='john', email='john@example.com').returning()
 sql, params = query.render()
 # ('INSERT INTO users (id, username, email) VALUES (?, ?, ?) RETURNING *', [...])
 
 # INSERT IGNORE (MySQL)
-query = Users.insert(values).ignore()
+query = Users.insert(id='abc123', username='john', email='john@example.com').ignore()
 sql, params = query.render()
 # ('INSERT IGNORE INTO users (id, username, email) VALUES (?, ?, ?)', [...])
 
 # ON CONFLICT DO NOTHING (Postgres/SQLite)
-query = Users.insert(values).on_conflict_do_nothing()
+query = Users.insert(id='abc123', username='john', email='john@example.com').on_conflict_do_nothing()
 # ('INSERT INTO users (...) VALUES (...) ON CONFLICT DO NOTHING', [...])
 
 # ON CONFLICT DO NOTHING with specific conflict target (Postgres/SQLite)
-query = Users.insert(values).on_conflict_do_nothing(conflict_on='email')
+query = Users.insert(id='abc123', username='john', email='john@example.com').on_conflict_do_nothing(conflict_on='email')
 # ('INSERT INTO users (...) VALUES (...) ON CONFLICT (email) DO NOTHING', [...])
 
 # ON CONFLICT DO UPDATE (Postgres/SQLite upsert)
-query = Users.insert(values).on_conflict_update(conflict_on='id')
+query = Users.insert(id='abc123', username='john', email='john@example.com').on_conflict_update(conflict_on='id')
 # ('INSERT INTO users (...) VALUES (...)
 #   ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, email = EXCLUDED.email', [...])
 
 # ON CONFLICT with custom update
-query = Users.insert(values).on_conflict_update(
+query = Users.insert(id='abc123', username='john', email='john@example.com').on_conflict_update(
     conflict_on='id',
     update={'username': 'updated_name'}
 )
 
 # ON DUPLICATE KEY UPDATE (MySQL)
-query = Users.insert(values).on_duplicate_key_update()
+query = Users.insert(id='abc123', username='john', email='john@example.com').on_duplicate_key_update()
 # ('INSERT INTO users (...) VALUES (...)
 #   ON DUPLICATE KEY UPDATE id = VALUES(id), username = VALUES(username), ...', [...])
 
 # Chain multiple modifiers
-query = (Users.insert(values)
+query = (Users.insert(id='abc123', username='john', email='john@example.com')
          .on_conflict_update(conflict_on='id')
          .returning('id', 'username'))
 ```
@@ -330,22 +323,22 @@ query = (Users.insert(values)
 
 ```python
 # Basic update (no WHERE = updates all rows!)
-query = Users.update({'email': 'newemail@example.com'})
+query = Users.update(email='newemail@example.com')
 sql, params = query.render()
 # ('UPDATE users SET email = ?', ['newemail@example.com'])
 
 # UPDATE with WHERE
-query = Users.update({'email': 'newemail@example.com'}).where(Users.id == 'abc123')
+query = Users.update(email='newemail@example.com').where(Users.id == 'abc123')
 sql, params = query.render()
 # ('UPDATE users SET email = ? WHERE users.id = ?', ['newemail@example.com', 'abc123'])
 
 # Multiple WHERE conditions
-query = (Users.update({'email': 'newemail@example.com'})
+query = (Users.update(email='newemail@example.com')
          .where(Users.id == 'abc123')
          .where(Users.age > 18))
 
 # With RETURNING (Postgres/SQLite)
-query = (Users.update({'email': 'new@example.com'})
+query = (Users.update(email='new@example.com')
          .where(Users.id == 'abc123')
          .returning())
 # ('UPDATE users SET email = ? WHERE users.id = ? RETURNING *', [...])

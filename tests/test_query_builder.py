@@ -351,7 +351,7 @@ def test_schema_in_update():
         id: Column
         name: Column
 
-    query = Accounts.update({'name': 'Updated Account'}).where(Accounts.id == '1')
+    query = Accounts.update(name='Updated Account').where(Accounts.id == '1')
     sql, params = query.render()
 
     assert 'UPDATE other.accounts SET' in sql
@@ -601,7 +601,7 @@ def test_table_insert_chained_with_returning():
 
 def test_table_update_with_where():
     """Test table.update() with WHERE clause"""
-    builder = Users.update({'username': 'bob_updated'}).where(Users.id == 5)
+    builder = Users.update(username='bob_updated').where(Users.id == 5)
     assert isinstance(builder, UpdateBuilder)
 
     sql, params = builder.render()
@@ -615,7 +615,7 @@ def test_table_update_with_where():
 
 def test_table_update_multiple_conditions():
     """Test table.update() with multiple WHERE conditions"""
-    builder = (Users.update({'username': 'bob_updated', 'email': 'new@example.com'})
+    builder = (Users.update(username='bob_updated', email='new@example.com')
                .where(Users.id > 10)
                .where(Users.created_at == None))
 
@@ -630,7 +630,7 @@ def test_table_update_multiple_conditions():
 
 def test_table_update_with_returning():
     """Test table.update() with RETURNING"""
-    builder = Users.update({'username': 'bob_updated'}).where(Users.id == 5).returning()
+    builder = Users.update(username='bob_updated').where(Users.id == 5).returning()
     sql, params = builder.render()
 
     assert 'UPDATE users SET' in sql
@@ -681,7 +681,7 @@ def test_table_delete_with_returning():
 def test_update_with_t_string_where():
     """Test UpdateBuilder with raw t-string WHERE clause"""
     min_age = 18
-    builder = Users.update({'username': 'adult'}).where(t"age >= {min_age}")
+    builder = Users.update(username='adult').where(t"age >= {min_age}")
 
     sql, params = builder.render()
 
@@ -1062,7 +1062,7 @@ def test_update_with_onupdate_default():
         title = SAColumn(String)
         updated_at = SAColumn(String, onupdate=lambda: 'updated_timestamp')
 
-    query = Articles.update({'title': 'Updated Title'}).where(Articles.id == '123')
+    query = Articles.update(title='Updated Title').where(Articles.id == '123')
     sql, params = query.render()
 
     assert 'UPDATE articles SET' in sql
@@ -1082,7 +1082,7 @@ def test_update_overrides_onupdate():
         title = SAColumn(String)
         updated_at = SAColumn(String, onupdate=lambda: 'auto_timestamp')
 
-    query = Articles.update({'title': 'Updated', 'updated_at': 'manual_timestamp'}).where(Articles.id == '123')
+    query = Articles.update(title='Updated', updated_at='manual_timestamp').where(Articles.id == '123')
     sql, params = query.render()
 
     assert 'UPDATE articles SET' in sql
@@ -1140,14 +1140,14 @@ def test_returning_cols_validation_update():
     import pytest
 
     # Test with malicious returning column
-    query = Users.update({'username': 'hacked'})
+    query = Users.update(username='hacked')
     builder = query.returning("id, (SELECT password FROM admin_users LIMIT 1) AS stolen")
 
     with pytest.raises(ValueError, match="Invalid RETURNING column name"):
         builder.render()
 
     # Test with valid returning columns (should work)
-    query2 = Users.update({'username': 'updated'})
+    query2 = Users.update(username='updated')
     builder2 = query2.where(Users.id == 5).returning("id", "username")
     sql, params = builder2.render()
 

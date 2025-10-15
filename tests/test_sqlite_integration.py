@@ -136,7 +136,7 @@ async def test_update_with_returning(conn):
         age: int
 
     # Update with RETURNING
-    query = TestUsers.update({'age': 31}).where(TestUsers.name == 'Alice').returning()
+    query = TestUsers.update(age=31).where(TestUsers.name == 'Alice').returning()
     sql, params = query.render()
 
     assert 'RETURNING *' in sql
@@ -196,7 +196,7 @@ async def test_update_without_returning(conn):
         age: int
 
     # Update without RETURNING
-    query = TestUsers.update({'age': 31}).where(TestUsers.name == 'Alice')
+    query = TestUsers.update(age=31).where(TestUsers.name == 'Alice')
     sql, params = query.render()
 
     # Should NOT have RETURNING clause
@@ -278,7 +278,7 @@ async def test_helper_functions(conn):
     assert row[1] == 25
 
     # Test update
-    query = tsql.update('test_users', {'age': 26}, 1)
+    query = tsql.update('test_users', 1, age=26)
     sql, params = query.render()
 
     await conn.execute(sql, params)

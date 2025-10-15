@@ -326,19 +326,23 @@ def insert(table: str, **values: Any) -> TSQL:
     return TSQL(t"INSERT INTO {table:literal} {values:as_values}")
 
 
-def update(table: str, values: dict[str, Any], id: str | int) -> TSQL:
+def update(table: str, id: str | int, **values: Any) -> TSQL:
     """Helper function to build UPDATE queries for a single row
 
     Args:
         table: Table name
-        values: Dictionary of column names and values to update
         id: ID value to update
+        **values: Column names and values to update as keyword arguments
 
     Returns:
         TSQL object representing the UPDATE query
+
+    Example:
+        update('users', 123, name='Bob', age=35)
+        Or with dict unpacking: update('users', 123, **my_dict)
     """
-    if not isinstance(values, dict):
-        raise ValueError("values must be a dictionary")
+    if not values:
+        raise ValueError("update requires at least one column value")
 
     return TSQL(t"UPDATE {table:literal} SET {values:as_set} WHERE id = {id}")
 

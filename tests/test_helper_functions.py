@@ -59,14 +59,9 @@ def test_insert():
 
 
 def test_update():
-    values = {
-        'name': 'Bob Updated',
-        'age': 35
-    }
-    
-    query = tsql.update('users', values, 123)
+    query = tsql.update('users', 123, name='Bob Updated', age=35)
     result = tsql.render(query)
-    
+
     assert "UPDATE users SET" in result[0]
     assert "name = ?" in result[0]
     assert "age = ?" in result[0]

@@ -298,14 +298,18 @@ class Table:
         return InsertBuilder(cls, values)
 
     @classmethod
-    def update(cls, values: dict[str, Any]) -> 'UpdateBuilder':
+    def update(cls, **values: Any) -> 'UpdateBuilder':
         """Start building an UPDATE query
 
         Args:
-            values: Dictionary of column names and values to update
+            **values: Column names and values to update as keyword arguments
 
         Returns:
             UpdateBuilder for adding WHERE conditions
+
+        Example:
+            Users.update(username='bob', email='bob@example.com')
+            Or with dict unpacking: Users.update(**my_dict)
         """
         return UpdateBuilder(cls, values)
 

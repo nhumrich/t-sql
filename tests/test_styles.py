@@ -40,7 +40,7 @@ def test_named_style():
     assert val1 == ':name'
     assert val2 == ':foo'
     assert val3 == ':bar'
-    assert q.params == ['a', 'b', 'c']
+    assert q.params == {'name': 'a', 'foo': 'b', 'bar': 'c'}
 
 
 def test_format_style():
@@ -68,7 +68,7 @@ def test_pyformat_style():
     assert val1 == '%(name)s'
     assert val2 == '%(foo)s'
     assert val3 == '%(bar)s'
-    assert q.params == ['a', 'b', 'c']
+    assert q.params == {'name': 'a', 'foo': 'b', 'bar': 'c'}
 
 
 def test_numeric_dollar_style():
@@ -112,7 +112,7 @@ def test_named_style_with_integer_values():
     result = render(t'SELECT * FROM users WHERE age = {age}', style=NAMED)
 
     assert result.sql == 'SELECT * FROM users WHERE age = :age'
-    assert result.values == [25]
+    assert result.values == {'age': 25}
 
 
 def test_pyformat_style_with_integer_values():
@@ -124,5 +124,5 @@ def test_pyformat_style_with_integer_values():
     result = render(t'SELECT * FROM users WHERE age = {age}', style=PYFORMAT)
 
     assert result.sql == 'SELECT * FROM users WHERE age = %(age)s'
-    assert result.values == [25]
+    assert result.values == {'age': 25}
 

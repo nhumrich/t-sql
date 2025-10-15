@@ -1,4 +1,5 @@
 import abc
+import re
 from itertools import count
 
 
@@ -9,6 +10,33 @@ class ParamStyle(abc.ABC):
     @abc.abstractmethod
     def __iter__(self):
         raise NotImplementedError()
+
+    def _init_dict_params(self):
+        """Initialize params as dict for named parameter styles."""
+        self.params = {}
+
+    @staticmethod
+    def _sanitize_param_name(name: str, used_names: set) -> str:
+        """Sanitize parameter name to be a valid SQL identifier.
+
+        Preserves readable names when possible, sanitizes complex expressions.
+        Handles collisions by appending numbers.
+        """
+        if name.isidentifier() and name not in used_names:
+            return name
+
+        sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
+        if not sanitized or not (sanitized[0].isalpha() or sanitized[0] == '_'):
+            sanitized = 'param_' + sanitized if sanitized else 'param'
+
+        if sanitized in used_names:
+            counter = 1
+            while f"{sanitized}_{counter}" in used_names:
+                counter += 1
+            sanitized = f"{sanitized}_{counter}"
+
+        return sanitized
 
 class QMARK(ParamStyle):
     # WHERE name=?
@@ -32,11 +60,18 @@ class NUMERIC(ParamStyle):
 
 class NAMED(ParamStyle):
     # WHERE name=:name
+    def __init__(self):
+        super().__init__()
+        self._init_dict_params()
+
     def __iter__(self):
         name, value = yield
+        used_names = set()
         while True:
-            self.params.append(value)
-            name, value = yield f':{name}'
+            param_name = self._sanitize_param_name(name, used_names)
+            used_names.add(param_name)
+            self.params[param_name] = value
+            name, value = yield f':{param_name}'
 
 
 class FORMAT(ParamStyle):
@@ -50,11 +85,18 @@ class FORMAT(ParamStyle):
 
 class PYFORMAT(FORMAT):
     # WHERE name=%(name)s
+    def __init__(self):
+        super().__init__()
+        self._init_dict_params()
+
     def __iter__(self):
         name, value = yield
+        used_names = set()
         while True:
-            self.params.append(value)
-            name, value = yield f'%({name})s'
+            param_name = self._sanitize_param_name(name, used_names)
+            used_names.add(param_name)
+            self.params[param_name] = value
+            name, value = yield f'%({param_name})s'
 
 
 class NUMERIC_DOLLAR(ParamStyle):

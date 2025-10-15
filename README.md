@@ -505,17 +505,47 @@ class Users(Table, table_name='user_accounts', schema='public'):
     name: Column
 ```
 
-# Note on Usage
+# Rendering Queries
 
-This library should ideally be used in middleware or library code right before making a query. It can enforce the use of t-strings and prevent raw strings:
+All query types (t-strings, TSQL objects, and QueryBuilder objects) can be rendered using `tsql.render()`:
 
 ```python
-from string.templatelib import Template
 import tsql
+from tsql.query_builder import Table, Column
 
-def execute_sql_query(query):
-    if not isinstance(query, Template):
-        raise TypeError('Cannot make a query without using t-strings')
+class Users(Table):
+    id: Column
+    name: Column
 
-    return sql_engine.execute(*tsql.render(query))
+# All of these work with tsql.render():
+sql, params = tsql.render(t"SELECT * FROM users WHERE id = {user_id}")
+sql, params = tsql.render(Users.select().where(Users.id == user_id))
+sql, params = tsql.render(tsql.select('users', user_id))
+
+# Or call .render() directly on TSQL/QueryBuilder objects:
+query = Users.select().where(Users.age > 18)
+sql, params = query.render()
 ```
+
+# Type Safety & Preventing SQL Injection
+
+This library should ideally be used in middleware or library code to enforce safe query construction. Use the `TSQLQuery` type to prevent raw strings:
+
+```python
+from tsql import TSQLQuery, render
+
+def execute_sql_query(query: TSQLQuery):
+    """Only accepts safe, parameterized queries"""
+    sql, params = render(query)
+    return sql_engine.execute(sql, params)
+
+# Type checker allows these:
+execute_sql_query(t"SELECT * FROM users WHERE id = {user_id}")  # ✓
+execute_sql_query(Users.select())  # ✓
+execute_sql_query(tsql.select('users'))  # ✓
+
+# Type checker rejects raw strings:
+execute_sql_query("SELECT * FROM users")  # ✗ Type error!
+```
+
+The `TSQLQuery` type is a union of `TSQL`, `Template` (t-strings), and `QueryBuilder`, ensuring all queries are safe from SQL injection.

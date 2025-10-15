@@ -1,9 +1,12 @@
 import re
 import string
-from typing import NamedTuple, Tuple, Any, List, Dict, Iterable
+from typing import NamedTuple, Tuple, Any, List, Dict, Iterable, Union, TYPE_CHECKING
 from string.templatelib import Template, Interpolation
 
 from tsql.styles import ParamStyle, QMARK
+
+if TYPE_CHECKING:
+    from tsql.query_builder import QueryBuilder
 
 default_style = QMARK
 
@@ -213,7 +216,57 @@ def as_set(value_dict: dict[str, Any]):
     return tsql_obj
 
 
-def render(query: Template|TSQL, style=None) -> RenderedQuery:
+# Type alias for safe, parameterized queries
+TSQLQuery = Union[TSQL, Template, 'QueryBuilder']
+"""Type alias representing safe, parameterized SQL queries.
+
+This type includes all valid ways to construct safe queries in tsql:
+- TSQL: Rendered t-string queries
+- Template: Raw t-string templates (PEP 750)
+- QueryBuilder: Type-safe query builder objects
+
+Use this type to ensure functions only accept safe, parameterized queries
+and never raw strings that could be vulnerable to SQL injection.
+
+Examples:
+    Accept any safe query type::
+
+        def execute_query(query: TSQLQuery) -> None:
+            sql, params = render(query)
+            cursor.execute(sql, params)
+
+    Type checking prevents unsafe usage::
+
+        execute_query(t"SELECT * FROM users WHERE id = {user_id}")  # OK
+        execute_query(select("users"))  # OK
+        execute_query(User.select().where(User.id == 1))  # OK
+        execute_query("SELECT * FROM users")  # Type error!
+"""
+
+
+def render(query: TSQLQuery, style=None) -> RenderedQuery:
+    """Render a safe query to SQL and parameters.
+
+    Args:
+        query: A TSQLQuery (TSQL, Template, or QueryBuilder)
+        style: Optional parameter style (defaults to global default_style)
+
+    Returns:
+        RenderedQuery with sql string and parameter values
+
+    Raises:
+        TypeError: If query is a raw string (use t-strings instead)
+    """
+    # Handle QueryBuilder (duck typing to avoid circular import)
+    if hasattr(query, 'build') and callable(query.build):
+        query = query.build()
+
+    if isinstance(query, str):
+        raise TypeError(
+            "Cannot render raw strings - they are vulnerable to SQL injection. "
+            "Use t-strings instead: t'SELECT * FROM users WHERE id = {user_id}'"
+        )
+
     if not isinstance(query, TSQL):
         query = TSQL(query)
 
@@ -305,6 +358,7 @@ def delete(table: str, id: str | int) -> TSQL:
 
 __all__ = [
     'TSQL',
+    'TSQLQuery',
     'render',
     't_join',
     'select',

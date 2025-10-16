@@ -255,8 +255,9 @@ query = Users.select().where(Users.id.in_([1, 2, 3]))
 query = Users.select().where(Users.username.like('%john%'))
 
 # ORDER BY
-query = Posts.select().order_by(Posts.id)
-query = Posts.select().order_by((Posts.id, 'DESC'))
+query = Posts.select().order_by(Posts.id)  # defaults to ASC
+query = Posts.select().order_by(Posts.id.desc())
+query = Posts.select().order_by(Posts.created_at.asc(), Posts.id.desc())
 
 # LIMIT and OFFSET
 query = Posts.select().limit(10).offset(20)

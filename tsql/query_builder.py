@@ -16,6 +16,17 @@ except ImportError:
     SAColumnType = None
 
 
+class OrderByClause:
+    """Represents a column with an ORDER BY direction (ASC/DESC)"""
+
+    def __init__(self, column: 'Column', direction: str):
+        self.column = column
+        self.direction = direction.upper()
+
+    def __repr__(self) -> str:
+        return f"OrderByClause({self.column!r}, {self.direction!r})"
+
+
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
@@ -139,6 +150,28 @@ class Column:
     def is_not_null(self) -> 'Condition':
         """Create an IS NOT NULL condition"""
         return Condition(self, 'IS NOT', None)
+
+    def asc(self) -> OrderByClause:
+        """Create an ascending ORDER BY clause
+
+        Returns:
+            OrderByClause for use in order_by()
+
+        Example:
+            Users.select().order_by(Users.username.asc())
+        """
+        return OrderByClause(self, 'ASC')
+
+    def desc(self) -> OrderByClause:
+        """Create a descending ORDER BY clause
+
+        Returns:
+            OrderByClause for use in order_by()
+
+        Example:
+            Users.select().order_by(Users.created_at.desc())
+        """
+        return OrderByClause(self, 'DESC')
 
 
 class Table:
@@ -838,11 +871,22 @@ class SelectQueryBuilder(QueryBuilder):
         """Add a RIGHT JOIN clause"""
         return self.join(table, on, 'RIGHT')
 
-    def order_by(self, *columns: Union[Column, tuple[Column, str]]) -> 'SelectQueryBuilder':
-        """Add ORDER BY clause. Pass (column, 'DESC') for descending"""
+    def order_by(self, *columns: Union[Column, OrderByClause]) -> 'SelectQueryBuilder':
+        """Add ORDER BY clause
+
+        Args:
+            columns: Column objects or OrderByClause objects (from .asc()/.desc())
+
+        Examples:
+            # Using .asc() and .desc() methods
+            Users.select().order_by(Users.username.asc(), Users.id.desc())
+
+            # Bare column defaults to ASC
+            Users.select().order_by(Users.username)
+        """
         for col in columns:
-            if isinstance(col, tuple):
-                self._order_by_columns.append(col)
+            if isinstance(col, OrderByClause):
+                self._order_by_columns.append((col.column, col.direction))
             else:
                 self._order_by_columns.append((col, 'ASC'))
         return self

@@ -331,7 +331,7 @@ async def test_query_builder_select(conn):
     assert rows[0][0] == 'Alice'
 
     # Test ORDER BY
-    query = TestUsers.select().order_by((TestUsers.age, 'DESC'))
+    query = TestUsers.select().order_by(TestUsers.age.desc())
     sql, params = query.render()
 
     cursor = await conn.execute(sql, params)

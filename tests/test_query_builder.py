@@ -213,7 +213,7 @@ def test_order_by():
 
 def test_order_by_desc():
     """Test ORDER BY with DESC"""
-    query = Users.select().order_by((Users.id, 'DESC'))
+    query = Users.select().order_by(Users.id.desc())
     sql, params = query.render()
 
     assert 'ORDER BY users.id DESC' in sql
@@ -221,7 +221,39 @@ def test_order_by_desc():
 
 def test_order_by_multiple():
     """Test ORDER BY with multiple columns"""
-    query = Users.select().order_by(Users.username, (Users.id, 'DESC'))
+    query = Users.select().order_by(Users.username, Users.id.desc())
+    sql, params = query.render()
+
+    assert 'ORDER BY users.username ASC, users.id DESC' in sql
+
+
+def test_order_by_asc_method():
+    """Test ORDER BY with .asc() method"""
+    query = Users.select().order_by(Users.username.asc())
+    sql, params = query.render()
+
+    assert 'ORDER BY users.username ASC' in sql
+
+
+def test_order_by_desc_method():
+    """Test ORDER BY with .desc() method"""
+    query = Users.select().order_by(Users.id.desc())
+    sql, params = query.render()
+
+    assert 'ORDER BY users.id DESC' in sql
+
+
+def test_order_by_mixed_methods():
+    """Test ORDER BY with mixed .asc() and .desc() methods"""
+    query = Users.select().order_by(Users.username.asc(), Users.id.desc())
+    sql, params = query.render()
+
+    assert 'ORDER BY users.username ASC, users.id DESC' in sql
+
+
+def test_order_by_mixed_syntax():
+    """Test ORDER BY with mixed method calls and bare columns"""
+    query = Users.select().order_by(Users.username, Users.id.desc())
     sql, params = query.render()
 
     assert 'ORDER BY users.username ASC, users.id DESC' in sql
@@ -242,7 +274,7 @@ def test_complex_query():
              .join(Users, Posts.user_id == Users.id)
              .where(Posts.id > 100)
              .where(Users.id >= 5)
-             .order_by((Posts.id, 'DESC'))
+             .order_by(Posts.id.desc())
              .limit(20))
     sql, params = query.render()
 
@@ -480,7 +512,7 @@ def test_complex_aggregation_query():
              .where(Posts.id > 100)
              .group_by(Posts.user_id)
              .having(Posts.id > 5)
-             .order_by((Posts.user_id, 'DESC'))
+             .order_by(Posts.user_id.desc())
              .limit(10)
              .offset(5))
     sql, params = query.render()

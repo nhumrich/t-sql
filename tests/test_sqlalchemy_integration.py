@@ -229,6 +229,38 @@ def test_mixing_query_builder_with_tsql():
     assert params == [18, 'john', 'john', 25]
 
 
+def test_sa_column_annotations_are_correct_type():
+    """Test that SA Column assignments get correct type annotations for IDE autocomplete"""
+    from tsql.query_builder import Column as TsqlColumn
+
+    metadata = MetaData()
+
+    class MyTable(Table, table_name='mytable', metadata=metadata):
+        my_column = Column(TIMESTAMP())
+        another = Column(Integer())
+        text_field = Column(String(100))
+
+    # Verify that __annotations__ has been updated to reflect tsql.Column
+    assert 'my_column' in MyTable.__annotations__
+    assert 'another' in MyTable.__annotations__
+    assert 'text_field' in MyTable.__annotations__
+
+    assert MyTable.__annotations__['my_column'] == TsqlColumn
+    assert MyTable.__annotations__['another'] == TsqlColumn
+    assert MyTable.__annotations__['text_field'] == TsqlColumn
+
+    # Verify that the columns actually work as tsql.Column objects
+    col = MyTable.my_column
+    assert isinstance(col, TsqlColumn)
+    assert hasattr(col, 'is_null')
+    assert hasattr(col, 'asc')
+    assert hasattr(col, 'desc')
+
+    # Verify is_null works
+    condition = col.is_null
+    assert condition.operator == 'IS'
+    assert condition.right is None
+
 def gen_id(prefix):
     """Dummy function for test"""
     return f"{prefix}_123"

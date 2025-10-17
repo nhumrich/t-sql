@@ -38,10 +38,9 @@ class OrderByClause:
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
-    def __init__(self, table_name: str = None, column_name: str = None, python_type: type = None, alias: str = None, schema: str = None):
+    def __init__(self, table_name: str = None, column_name: str = None, alias: str = None, schema: str = None):
         self.table_name = table_name
         self.column_name = column_name
-        self.python_type = python_type
         self.alias = alias
         self.schema = schema
 
@@ -71,7 +70,7 @@ class Column:
         Example:
             users.select(users.first_name.as_('first'), users.last_name.as_('last'))
         """
-        return Column(self.table_name, self.column_name, self.python_type, alias, self.schema)
+        return Column(self.table_name, self.column_name, alias, self.schema)
 
     def __eq__(self, other) -> 'Condition':
         if other is None:
@@ -271,7 +270,11 @@ class Table:
                     sa_columns.append(sa_col)
 
                 # Create query builder ColumnDescriptor
-                setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
+                setattr(cls, field_name, ColumnDescriptor(field_name))
+                # Update annotation to reflect the descriptor's return type
+                if not hasattr(cls, '__annotations__'):
+                    cls.__annotations__ = {}
+                cls.__annotations__[field_name] = Column
                 continue
 
             # Check if it's a Column instance (for column_name remapping)
@@ -283,7 +286,11 @@ class Table:
                     db_column_name = field_name
 
                 # Create query builder ColumnDescriptor with the DB column name
-                setattr(cls, field_name, ColumnDescriptor(db_column_name, field_type))
+                setattr(cls, field_name, ColumnDescriptor(db_column_name))
+                # Update annotation to reflect the descriptor's return type
+                if not hasattr(cls, '__annotations__'):
+                    cls.__annotations__ = {}
+                cls.__annotations__[field_name] = Column
 
                 # Create SQLAlchemy column if metadata provided
                 if metadata is not None and HAS_SQLALCHEMY:
@@ -294,7 +301,11 @@ class Table:
             # Check if it's an Ellipsis (...) declaration
             if field_value is ...:
                 # Create query builder ColumnDescriptor
-                setattr(cls, field_name, ColumnDescriptor(field_name, None))
+                setattr(cls, field_name, ColumnDescriptor(field_name))
+                # Update annotation to reflect the descriptor's return type
+                if not hasattr(cls, '__annotations__'):
+                    cls.__annotations__ = {}
+                cls.__annotations__[field_name] = Column
                 continue
 
             # Otherwise, handle type annotations
@@ -303,7 +314,11 @@ class Table:
                 continue
 
             # Create query builder ColumnDescriptor for type-annotated fields
-            setattr(cls, field_name, ColumnDescriptor(field_name, field_type))
+            setattr(cls, field_name, ColumnDescriptor(field_name))
+            # Update annotation to reflect the descriptor's return type
+            if not hasattr(cls, '__annotations__'):
+                cls.__annotations__ = {}
+            cls.__annotations__[field_name] = Column
 
             # Create SQLAlchemy column if metadata provided
             if metadata is not None and HAS_SQLALCHEMY:
@@ -367,9 +382,8 @@ class Table:
 class ColumnDescriptor:
     """Descriptor that creates Column objects when accessed on Table classes or instances"""
 
-    def __init__(self, column_name: str, python_type: type = None):
+    def __init__(self, column_name: str):
         self.column_name = column_name
-        self.python_type = python_type
 
     def __set_name__(self, owner, name):
         self.column_name = name
@@ -378,7 +392,7 @@ class ColumnDescriptor:
         if objtype is None:
             objtype = type(obj)
         schema = getattr(objtype, 'schema', None)
-        return Column(objtype.table_name, self.column_name, self.python_type, schema=schema)
+        return Column(objtype.table_name, self.column_name, schema=schema)
 
 
 class Condition:

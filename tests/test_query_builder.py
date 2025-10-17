@@ -838,6 +838,64 @@ def test_tstring_with_params_in_select():
     assert params == [' - ', 5]
 
 
+def test_select_table_all():
+    """Test selecting all columns from a table using Table.ALL"""
+    query = Posts.select(Posts.ALL)
+    sql, params = query.render()
+
+    assert 'SELECT posts.*' in sql
+    assert 'FROM posts' in sql
+    assert params == []
+
+
+def test_select_table_all_with_other_columns():
+    """Test mixing Table.ALL with specific columns from another table"""
+    query = Posts.select(Posts.ALL, Users.username, Users.email)
+    sql, params = query.render()
+
+    assert 'SELECT posts.*, users.username, users.email' in sql
+    assert 'FROM posts' in sql
+    assert params == []
+
+
+def test_select_multiple_table_alls():
+    """Test selecting all columns from multiple tables"""
+    query = Posts.select(Posts.ALL, Users.ALL)
+    sql, params = query.render()
+
+    assert 'SELECT posts.*, users.*' in sql
+    assert 'FROM posts' in sql
+    assert params == []
+
+
+def test_select_table_all_with_join():
+    """Test Table.ALL in a real-world join scenario"""
+    query = (Posts.select(Posts.ALL, Users.username)
+             .join(Users, Posts.user_id == Users.id)
+             .where(Posts.id > 100))
+    sql, params = query.render()
+
+    assert 'SELECT posts.*, users.username' in sql
+    assert 'FROM posts' in sql
+    assert 'INNER JOIN users ON posts.user_id = users.id' in sql
+    assert 'WHERE posts.id > ?' in sql
+    assert params == [100]
+
+
+def test_select_table_all_with_schema():
+    """Test that Table.ALL works with schema-qualified tables"""
+    class Accounts(Table, table_name='accounts', schema='other'):
+        id: Column
+        name: Column
+
+    query = Accounts.select(Accounts.ALL)
+    sql, params = query.render()
+
+    assert 'SELECT other.accounts.*' in sql
+    assert 'FROM other.accounts' in sql
+    assert params == []
+
+
 def test_column_is_null_method():
     """Test is_null method"""
     condition = Users.email.is_null()

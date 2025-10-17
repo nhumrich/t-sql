@@ -327,6 +327,9 @@ class Table:
         if metadata is not None and HAS_SQLALCHEMY:
             cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, schema=schema)
 
+        # Add the ALL descriptor for wildcard column selection
+        cls.ALL = AllColumnsDescriptor()
+
     @classmethod
     def select(cls, *columns: Union['Column', Template]) -> 'SelectQueryBuilder':
         """Start building a SELECT query"""
@@ -391,6 +394,16 @@ class ColumnDescriptor:
             objtype = type(obj)
         schema = getattr(objtype, 'schema', None)
         return Column(objtype.table_name, self.column_name, schema=schema)
+
+
+class AllColumnsDescriptor:
+    """Descriptor that creates a Column with wildcard (*) for selecting all columns from a table"""
+
+    def __get__(self, obj, objtype=None) -> Column:
+        if objtype is None:
+            objtype = type(obj)
+        schema = getattr(objtype, 'schema', None)
+        return Column(objtype.table_name, '*', schema=schema)
 
 
 class Condition:

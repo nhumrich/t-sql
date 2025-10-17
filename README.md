@@ -247,6 +247,29 @@ query = (Posts.select()
 
 ## Query Features
 
+### Selecting All Columns from a Table
+
+Use `Table.ALL` to select all columns from a specific table:
+
+```python
+# Select all columns from posts
+query = Posts.select(Posts.ALL)
+# ('SELECT posts.* FROM posts', [])
+
+# Select all columns from posts + specific columns from joined tables
+query = (Posts.select(Posts.ALL, Users.username, Users.email)
+         .join(Users, Posts.user_id == Users.id))
+# ('SELECT posts.*, users.username, users.email FROM posts INNER JOIN users ON ...', [])
+
+# Select all columns from multiple tables
+query = Posts.select(Posts.ALL, Users.ALL).join(Users, Posts.user_id == Users.id)
+# ('SELECT posts.*, users.* FROM posts INNER JOIN users ON ...', [])
+```
+
+This is particularly useful when joining tables where you want all columns from one table but only specific columns from others.
+
+### NULL Checks and Other Operators
+
 ```python
 # NULL checks
 query = Users.select().where(Users.email.is_null())

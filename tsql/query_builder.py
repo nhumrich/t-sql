@@ -148,12 +148,10 @@ class Column:
         """
         return Condition(self, 'NOT BETWEEN', (start, end))
 
-    @property
     def is_null(self) -> 'Condition':
         """Create an IS NULL condition"""
         return Condition(self, 'IS', None)
 
-    @property
     def is_not_null(self) -> 'Condition':
         """Create an IS NOT NULL condition"""
         return Condition(self, 'IS NOT', None)

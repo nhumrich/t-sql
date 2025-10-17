@@ -257,7 +257,7 @@ def test_sa_column_annotations_are_correct_type():
     assert hasattr(col, 'desc')
 
     # Verify is_null works
-    condition = col.is_null
+    condition = col.is_null()
     assert condition.operator == 'IS'
     assert condition.right is None
 

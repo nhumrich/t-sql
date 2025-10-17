@@ -248,11 +248,23 @@ query = (Posts.select()
 ## Query Features
 
 ```python
+# NULL checks
+query = Users.select().where(Users.email.is_null())
+query = Users.select().where(Users.email.is_not_null())
+
 # IN clause
 query = Users.select().where(Users.id.in_([1, 2, 3]))
+query = Users.select().where(Users.id.not_in([1, 2, 3]))
 
 # LIKE clause
 query = Users.select().where(Users.username.like('%john%'))
+query = Users.select().where(Users.username.not_like('%john%'))
+query = Users.select().where(Users.username.ilike('%JOHN%'))  # case-insensitive
+query = Users.select().where(Users.username.not_ilike('%JOHN%'))
+
+# BETWEEN clause
+query = Users.select().where(Users.age.between(18, 65))
+query = Users.select().where(Users.age.not_between(18, 65))
 
 # ORDER BY
 query = Posts.select().order_by(Posts.id)  # defaults to ASC

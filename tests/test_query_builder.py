@@ -838,23 +838,23 @@ def test_tstring_with_params_in_select():
     assert params == [' - ', 5]
 
 
-def test_column_is_null_property():
-    """Test is_null property"""
-    condition = Users.email.is_null
+def test_column_is_null_method():
+    """Test is_null method"""
+    condition = Users.email.is_null()
     assert condition.operator == 'IS'
     assert condition.right is None
 
 
-def test_column_is_not_null_property():
-    """Test is_not_null property"""
-    condition = Users.email.is_not_null
+def test_column_is_not_null_method():
+    """Test is_not_null method"""
+    condition = Users.email.is_not_null()
     assert condition.operator == 'IS NOT'
     assert condition.right is None
 
 
 def test_where_with_is_null():
     """Test WHERE with is_null"""
-    query = Users.select().where(Users.email.is_null)
+    query = Users.select().where(Users.email.is_null())
     sql, params = query.render()
 
     assert 'WHERE users.email IS NULL' in sql
@@ -863,7 +863,7 @@ def test_where_with_is_null():
 
 def test_where_with_is_not_null():
     """Test WHERE with is_not_null"""
-    query = Users.select().where(Users.email.is_not_null)
+    query = Users.select().where(Users.email.is_not_null())
     sql, params = query.render()
 
     assert 'WHERE users.email IS NOT NULL' in sql
@@ -1002,7 +1002,7 @@ def test_complex_query_with_new_operators():
     """Test complex query using multiple new operators"""
     query = (Users.select()
              .where(Users.id.between(1, 100))
-             .where(Users.email.is_not_null)
+             .where(Users.email.is_not_null())
              .where(Users.id.not_in([5, 10, 15]))
              .where(Users.username.ilike('%test%')))
     sql, params = query.render()

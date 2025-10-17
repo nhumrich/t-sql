@@ -5,6 +5,14 @@ from abc import ABC, abstractmethod
 
 from tsql import TSQL, t_join
 
+
+class UnsafeQueryError(Exception):
+    """Raised when attempting to render an UPDATE or DELETE query without a WHERE clause.
+
+    To perform mass updates or deletes, explicitly call .all_rows() to confirm intent.
+    """
+    pass
+
 # Optional SQLAlchemy support
 try:
     from sqlalchemy import MetaData, Table as SATable, Column as SAColumn
@@ -687,10 +695,27 @@ class UpdateBuilder(QueryBuilder):
 
         self._conditions: List[Union[Condition, Template]] = []
         self._returning_cols: Optional[List[str]] = None
+        self._requires_where: bool = True
 
     def where(self, condition: Union[Condition, Template]) -> 'UpdateBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
         self._conditions.append(condition)
+        self._requires_where = False
+        return self
+
+    def all_rows(self) -> 'UpdateBuilder':
+        """Explicitly confirm intent to update all rows without a WHERE clause.
+
+        By default, UPDATE queries without WHERE clauses will raise UnsafeQueryError
+        at render time. Call this method to bypass that safety check.
+
+        Returns:
+            self for method chaining
+
+        Example:
+            Users.update(status='inactive').all_rows()
+        """
+        self._requires_where = False
         return self
 
     def returning(self, *columns: str) -> 'UpdateBuilder':
@@ -736,6 +761,11 @@ class UpdateBuilder(QueryBuilder):
 
     def render(self, style=None):
         """Convenience method to render the query directly"""
+        if self._requires_where:
+            raise UnsafeQueryError(
+                "UPDATE without WHERE clause requires explicit .all_rows() call to confirm intent. "
+                "This prevents accidentally updating all rows in the table."
+            )
         return self.to_tsql().render(style)
 
     def __repr__(self) -> str:
@@ -756,10 +786,27 @@ class DeleteBuilder(QueryBuilder):
         self.base_table = base_table
         self._conditions: List[Union[Condition, Template]] = []
         self._returning_cols: Optional[List[str]] = None
+        self._requires_where: bool = True
 
     def where(self, condition: Union[Condition, Template]) -> 'DeleteBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
         self._conditions.append(condition)
+        self._requires_where = False
+        return self
+
+    def all_rows(self) -> 'DeleteBuilder':
+        """Explicitly confirm intent to delete all rows without a WHERE clause.
+
+        By default, DELETE queries without WHERE clauses will raise UnsafeQueryError
+        at render time. Call this method to bypass that safety check.
+
+        Returns:
+            self for method chaining
+
+        Example:
+            Users.delete().all_rows()
+        """
+        self._requires_where = False
         return self
 
     def returning(self, *columns: str) -> 'DeleteBuilder':
@@ -804,6 +851,11 @@ class DeleteBuilder(QueryBuilder):
 
     def render(self, style=None):
         """Convenience method to render the query directly"""
+        if self._requires_where:
+            raise UnsafeQueryError(
+                "DELETE without WHERE clause requires explicit .all_rows() call to confirm intent. "
+                "This prevents accidentally deleting all rows in the table."
+            )
         return self.to_tsql().render(style)
 
     def __repr__(self) -> str:

@@ -1172,7 +1172,7 @@ def test_returning_cols_validation_update():
     import pytest
 
     # Test with malicious returning column
-    query = Users.update(username='hacked')
+    query = Users.update(username='hacked').all_rows()
     builder = query.returning("id, (SELECT password FROM admin_users LIMIT 1) AS stolen")
 
     with pytest.raises(ValueError, match="Invalid RETURNING column name"):
@@ -1191,7 +1191,7 @@ def test_returning_cols_validation_delete():
     import pytest
 
     # Test with malicious returning column
-    query = Users.delete()
+    query = Users.delete().all_rows()
     builder = query.returning("* FROM users; DROP TABLE secrets; --")
 
     with pytest.raises(ValueError, match="Invalid RETURNING column name"):
@@ -1222,3 +1222,46 @@ def test_conflict_cols_list_validation():
     sql, params = builder2.render()
 
     assert 'ON CONFLICT (id, email)' in sql
+
+
+def test_update_without_where_raises_error():
+    """Test that UPDATE without WHERE clause raises UnsafeQueryError"""
+    import pytest
+    from tsql.query_builder import UnsafeQueryError
+
+    builder = Users.update(username='updated')
+
+    with pytest.raises(UnsafeQueryError, match="UPDATE without WHERE clause requires explicit .all_rows()"):
+        builder.render()
+
+
+def test_update_with_all_rows_works():
+    """Test that UPDATE with .all_rows() bypasses safety check"""
+    builder = Users.update(username='updated').all_rows()
+    sql, params = builder.render()
+
+    assert 'UPDATE users SET' in sql
+    assert 'username = ?' in sql
+    assert 'WHERE' not in sql
+    assert params == ['updated']
+
+
+def test_delete_without_where_raises_error():
+    """Test that DELETE without WHERE clause raises UnsafeQueryError"""
+    import pytest
+    from tsql.query_builder import UnsafeQueryError
+
+    builder = Users.delete()
+
+    with pytest.raises(UnsafeQueryError, match="DELETE without WHERE clause requires explicit .all_rows()"):
+        builder.render()
+
+
+def test_delete_with_all_rows_works():
+    """Test that DELETE with .all_rows() bypasses safety check"""
+    builder = Users.delete().all_rows()
+    sql, params = builder.render()
+
+    assert 'DELETE FROM users' in sql
+    assert 'WHERE' not in sql
+    assert params == []

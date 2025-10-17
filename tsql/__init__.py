@@ -360,6 +360,8 @@ def delete(table: str, id: str | int) -> TSQL:
     return TSQL(t"DELETE FROM {table:literal} WHERE id = {id}")
 
 
+from tsql.query_builder import UnsafeQueryError
+
 __all__ = [
     'TSQL',
     'TSQLQuery',
@@ -370,5 +372,6 @@ __all__ = [
     'update',
     'delete',
     'set_style',
+    'UnsafeQueryError',
 ]
 

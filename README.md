@@ -323,10 +323,9 @@ query = (Users.insert(id='abc123', username='john', email='john@example.com')
 ### UPDATE
 
 ```python
-# Basic update (no WHERE = updates all rows!)
+# UPDATE requires WHERE clause or explicit .all_rows() for safety
 query = Users.update(email='newemail@example.com')
-sql, params = query.render()
-# ('UPDATE users SET email = ?', ['newemail@example.com'])
+# ❌ Raises UnsafeQueryError: UPDATE without WHERE requires .all_rows()
 
 # UPDATE with WHERE
 query = Users.update(email='newemail@example.com').where(Users.id == 'abc123')
@@ -338,6 +337,11 @@ query = (Users.update(email='newemail@example.com')
          .where(Users.id == 'abc123')
          .where(Users.age > 18))
 
+# Explicitly update all rows (use with caution!)
+query = Users.update(status='inactive').all_rows()
+sql, params = query.render()
+# ('UPDATE users SET status = ?', ['inactive'])
+
 # With RETURNING (Postgres/SQLite)
 query = (Users.update(email='new@example.com')
          .where(Users.id == 'abc123')
@@ -348,10 +352,9 @@ query = (Users.update(email='new@example.com')
 ### DELETE
 
 ```python
-# Basic delete (no WHERE = deletes all rows!)
+# DELETE requires WHERE clause or explicit .all_rows() for safety
 query = Users.delete()
-sql, params = query.render()
-# ('DELETE FROM users', [])
+# ❌ Raises UnsafeQueryError: DELETE without WHERE requires .all_rows()
 
 # DELETE with WHERE
 query = Users.delete().where(Users.id == 'abc123')
@@ -360,6 +363,11 @@ sql, params = query.render()
 
 # Multiple conditions
 query = Users.delete().where(Users.age < 18).where(Users.active == False)
+
+# Explicitly delete all rows (use with extreme caution!)
+query = Users.delete().all_rows()
+sql, params = query.render()
+# ('DELETE FROM users', [])
 
 # With RETURNING (Postgres/SQLite)
 query = Users.delete().where(Users.id == 'abc123').returning()
@@ -615,6 +623,27 @@ sql, _ = tsql.render(t"SELECT * FROM users WHERE name = {malicious}", style=tsql
 ```
 
 **Important:** While effective, parameterization is always preferred when available. Use `ESCAPED` only when necessary.
+
+### 4. Query Builder Safety: UPDATE/DELETE Protection
+
+The query builder prevents accidental mass UPDATE/DELETE operations by requiring an explicit WHERE clause or `.all_rows()` call:
+
+```python
+from tsql import UnsafeQueryError
+
+# This raises UnsafeQueryError at render time
+Users.update(status='inactive').render()  # ❌ Error!
+Users.delete().render()  # ❌ Error!
+
+# Must add WHERE clause
+Users.update(status='inactive').where(Users.id == user_id).render()  # ✅
+
+# Or explicitly confirm mass operation
+Users.update(status='inactive').all_rows().render()  # ✅
+Users.delete().all_rows().render()  # ✅
+```
+
+This protection catches the most common and dangerous SQL mistake: forgetting the WHERE clause. 
 
 ## Danger Zones: Where You Can Still Get Hurt
 

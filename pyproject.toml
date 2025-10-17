@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "t-sql"
-version = "4.0.0"
+version = "4.1.0"
 description = "Safe SQL. SQL queries for python t-strings (PEP 750)"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -23,9 +23,12 @@ dev = [
     "anyio>=4.9.0",
     "asyncpg>=0.30.0",
     "cryptography>=46.0.2",
+    "mypy>=1.18.2",
+    "pyright>=1.1.406",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.24.0",
     "sqlalchemy>=2.0.0",
+    "ty>=0.0.1a23",
 ]
 
 [tool.hatch.build.targets.wheel]

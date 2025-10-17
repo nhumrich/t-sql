@@ -38,7 +38,7 @@ class OrderByClause:
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
-    def __init__(self, table_name: str = None, column_name: str = None, alias: str = None, schema: str = None):
+    def __init__(self, table_name: str | None = None, column_name: str | None = None, alias: str | None = None, schema: str | None = None):
         self.table_name = table_name
         self.column_name = column_name
         self.alias = alias
@@ -194,13 +194,22 @@ class Table:
         class Users(Table, table_name='user_accounts'):
             id: Column
 
-    For SQLAlchemy integration, use SQLAlchemy Column objects:
+    For SQLAlchemy integration, use the SAColumn wrapper for type checker compatibility:
 
-        from sqlalchemy import Column, Integer, String
+        from sqlalchemy import Integer, String
+        from tsql.query_builder import Table, SAColumn
 
         class Users(Table, metadata=metadata, schema='public'):
-            id = Column(Integer, primary_key=True)
-            name = Column(String(100))
+            id = SAColumn(Integer, primary_key=True)
+            name = SAColumn(String(100))
+
+    Alternative: Use explicit type annotations with SQLAlchemy Column:
+
+        from sqlalchemy import Column as SACol
+
+        class Users(Table, metadata=metadata):
+            id: Column = SACol(Integer, primary_key=True)
+            name: Column = SACol(String(100))
     """
     table_name: ClassVar[str]
     schema: ClassVar[Optional[str]] = None
@@ -267,9 +276,9 @@ class Table:
                     sa_col.name = field_name
                     sa_columns.append(sa_col)
 
-                # Create query builder ColumnDescriptor
-                setattr(cls, field_name, ColumnDescriptor(field_name))
-                # Update annotation to reflect the descriptor's return type
+                # Create query builder Column directly
+                setattr(cls, field_name, Column(cls.table_name, field_name, schema=schema))
+                # Update annotation to reflect the Column type
                 if not hasattr(cls, '__annotations__'):
                     cls.__annotations__ = {}
                 cls.__annotations__[field_name] = Column
@@ -283,9 +292,9 @@ class Table:
                     # No column_name specified, use field_name
                     db_column_name = field_name
 
-                # Create query builder ColumnDescriptor with the DB column name
-                setattr(cls, field_name, ColumnDescriptor(db_column_name))
-                # Update annotation to reflect the descriptor's return type
+                # Create query builder Column directly with the DB column name
+                setattr(cls, field_name, Column(cls.table_name, db_column_name, schema=schema))
+                # Update annotation to reflect the Column type
                 if not hasattr(cls, '__annotations__'):
                     cls.__annotations__ = {}
                 cls.__annotations__[field_name] = Column
@@ -298,9 +307,9 @@ class Table:
 
             # Check if it's an Ellipsis (...) declaration
             if field_value is ...:
-                # Create query builder ColumnDescriptor
-                setattr(cls, field_name, ColumnDescriptor(field_name))
-                # Update annotation to reflect the descriptor's return type
+                # Create query builder Column directly
+                setattr(cls, field_name, Column(cls.table_name, field_name, schema=schema))
+                # Update annotation to reflect the Column type
                 if not hasattr(cls, '__annotations__'):
                     cls.__annotations__ = {}
                 cls.__annotations__[field_name] = Column
@@ -311,9 +320,9 @@ class Table:
                 # No type annotation, Ellipsis, or SA Column - skip
                 continue
 
-            # Create query builder ColumnDescriptor for type-annotated fields
-            setattr(cls, field_name, ColumnDescriptor(field_name))
-            # Update annotation to reflect the descriptor's return type
+            # Create query builder Column directly for type-annotated fields
+            setattr(cls, field_name, Column(cls.table_name, field_name, schema=schema))
+            # Update annotation to reflect the Column type
             if not hasattr(cls, '__annotations__'):
                 cls.__annotations__ = {}
             cls.__annotations__[field_name] = Column
@@ -327,8 +336,8 @@ class Table:
         if metadata is not None and HAS_SQLALCHEMY:
             cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, schema=schema)
 
-        # Add the ALL descriptor for wildcard column selection
-        cls.ALL = AllColumnsDescriptor()
+        # Add the ALL column for wildcard column selection
+        cls.ALL = Column(cls.table_name, '*', schema=schema)
 
     @classmethod
     def select(cls, *columns: Union['Column', Template]) -> 'SelectQueryBuilder':
@@ -378,32 +387,6 @@ class Table:
             DeleteBuilder for adding WHERE conditions
         """
         return DeleteBuilder(cls)
-
-
-class ColumnDescriptor:
-    """Descriptor that creates Column objects when accessed on Table classes or instances"""
-
-    def __init__(self, column_name: str):
-        self.column_name = column_name
-
-    def __set_name__(self, owner, name):
-        self.column_name = name
-
-    def __get__(self, obj, objtype=None) -> Column:
-        if objtype is None:
-            objtype = type(obj)
-        schema = getattr(objtype, 'schema', None)
-        return Column(objtype.table_name, self.column_name, schema=schema)
-
-
-class AllColumnsDescriptor:
-    """Descriptor that creates a Column with wildcard (*) for selecting all columns from a table"""
-
-    def __get__(self, obj, objtype=None) -> Column:
-        if objtype is None:
-            objtype = type(obj)
-        schema = getattr(objtype, 'schema', None)
-        return Column(objtype.table_name, '*', schema=schema)
 
 
 class Condition:
@@ -1083,3 +1066,32 @@ if HAS_SQLALCHEMY:
         datetime: DateTime,
         float: Float,
     }
+
+
+# Helper function for type checker compatibility with SQLAlchemy columns
+def SAColumn(*args: Any, **kwargs: Any) -> Column:  # noqa: N802
+    """Wrapper for SQLAlchemy Column that satisfies type checkers.
+
+    This function returns a SQLAlchemy Column at runtime but tells type checkers
+    it returns a tsql Column. This allows you to use SQLAlchemy columns without
+    explicit type annotations while still getting proper IDE completions.
+
+    Usage:
+        from tsql.query_builder import Table, SAColumn
+        from sqlalchemy import Integer, String
+
+        class Users(Table):
+            id = SAColumn(Integer, primary_key=True)  # Type checker sees: tsql Column
+            name = SAColumn(String(100))
+
+    Note: This shadows the SQLAlchemy Column import. Import SA Column explicitly if needed:
+        from sqlalchemy import Column as SA_Column
+
+    Alternative: Use explicit type annotations:
+        from sqlalchemy import Column as SACol
+        id: Column = SACol(Integer, primary_key=True)
+    """
+    if not HAS_SQLALCHEMY:
+        raise ImportError("SQLAlchemy is not installed. Cannot use SAColumn() helper.")
+    from sqlalchemy import Column as SA_Column
+    return SA_Column(*args, **kwargs)  # type: ignore[return-value]

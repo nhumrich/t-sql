@@ -485,7 +485,7 @@ uv add t-sql --optional sqlalchemy
 **1. Simple Column annotations** (for query builder only):
 
 ```python
-from tsql import Table, Column
+from tsql.query_builder import Table, Column
 
 class Users(Table):
     id: Column
@@ -493,38 +493,29 @@ class Users(Table):
     age: Column
 ```
 
-**2. SQLAlchemy Column objects** (for alembic integration):
+**2. SQLAlchemy with SAColumn wrapper** (recommended for type checkers):
 
 ```python
-from sqlalchemy import MetaData, Column, String, Integer, ForeignKey
-from tsql.query_builder import Table
+from sqlalchemy import MetaData, Integer, String
+from tsql.query_builder import Table, SAColumn
 
 metadata = MetaData()
 
 class Users(Table, metadata=metadata):
-    id = Column(String, primary_key=True)
-    email = Column(String(255), unique=True, nullable=False)
-    name = Column(String(100))
-    age = Column(Integer)
+    id = SAColumn(Integer, primary_key=True)
+    email = SAColumn(String(255), unique=True, nullable=False)
+    name = SAColumn(String(100))
+    age = SAColumn(Integer)
 
 # Use for alembic
 target_metadata = metadata
 
-# Use for queries (works identically!)
+# Use for queries
 query = Users.select().where(Users.age > 18)
 ```
 
-You can mix both approaches:
+The `SAColumn` wrapper tells type checkers it returns a tsql `Column`, while at runtime it creates a SQLAlchemy `Column`. This gives you proper IDE completions for methods like `.is_null()`, `.like()`, etc.
 
-```python
-from sqlalchemy import Column, String, DateTime
-from sqlalchemy.sql.functions import now
-
-class Events(Table, metadata=metadata):
-    id = Column(String, primary_key=True)
-    topic: Column  # Simple annotation - becomes nullable String column
-    created_at = Column(DateTime, server_default=now())
-```
 
 ## Schema Support
 

@@ -258,8 +258,8 @@ def render(query: TSQLQuery, style=None) -> RenderedQuery:
         TypeError: If query is a raw string (use t-strings instead)
     """
     # Handle QueryBuilder (duck typing to avoid circular import)
-    if hasattr(query, 'build') and callable(query.build):
-        query = query.build()
+    if hasattr(query, 'to_tsql') and callable(query.to_tsql):
+        query = query.to_tsql()
 
     if isinstance(query, str):
         raise TypeError(

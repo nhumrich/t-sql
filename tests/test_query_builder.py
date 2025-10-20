@@ -331,6 +331,61 @@ def test_render_with_style():
     assert params == [5]
 
 
+def test_tsql_render_with_select_query_builder():
+    """Test that tsql.render() works with SelectQueryBuilder"""
+    query = Users.select(Users.id, Users.username).where(Users.id > 5)
+
+    sql, params = tsql.render(query)
+
+    assert 'SELECT users.id, users.username' in sql
+    assert 'WHERE users.id > ?' in sql
+    assert params == [5]
+
+
+def test_tsql_render_with_insert_builder():
+    """Test that tsql.render() works with InsertBuilder"""
+    query = Users.insert(username='bob', email='bob@example.com')
+
+    sql, params = tsql.render(query)
+
+    assert 'INSERT INTO users' in sql
+    assert 'username' in sql and 'email' in sql
+    assert params == ['bob', 'bob@example.com']
+
+
+def test_tsql_render_with_update_builder():
+    """Test that tsql.render() works with UpdateBuilder"""
+    query = Users.update(username='updated').where(Users.id == 5)
+
+    sql, params = tsql.render(query)
+
+    assert 'UPDATE users SET' in sql
+    assert 'username = ?' in sql
+    assert 'WHERE users.id = ?' in sql
+    assert params == ['updated', 5]
+
+
+def test_tsql_render_with_delete_builder():
+    """Test that tsql.render() works with DeleteBuilder"""
+    query = Users.delete().where(Users.id == 5)
+
+    sql, params = tsql.render(query)
+
+    assert 'DELETE FROM users' in sql
+    assert 'WHERE users.id = ?' in sql
+    assert params == [5]
+
+
+def test_tsql_render_with_query_builder_and_style():
+    """Test that tsql.render() works with query builder and custom style"""
+    query = Users.select().where(Users.id == 5)
+
+    sql, params = tsql.render(query, style=tsql.styles.NUMERIC_DOLLAR)
+
+    assert '$1' in sql
+    assert params == [5]
+
+
 def test_schema_support():
     """Test that schema parameter works"""
     class SchemaUsers(Table, table_name='users', schema='public'):

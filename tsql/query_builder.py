@@ -240,7 +240,7 @@ class Table:
                 continue
             field_value = getattr(cls, field_name, None)
 
-            # Check for Ellipsis syntax: id = ...
+            # Check for Ellipsis syntax: id = ...~
             if field_value is ...:
                 if field_name not in all_fields:
                     all_fields[field_name] = {
@@ -452,7 +452,7 @@ class Condition:
 class Join:
     """Represents a JOIN clause"""
 
-    def __init__(self, table: 'Table', condition: Condition, join_type: str = 'INNER'):
+    def __init__(self, table: type['Table'], condition: Condition, join_type: str = 'INNER'):
         self.table = table
         self.condition = condition
         self.join_type = join_type
@@ -495,7 +495,7 @@ class QueryBuilder(ABC):
 class InsertBuilder(QueryBuilder):
     """Fluent interface for building INSERT queries"""
 
-    def __init__(self, base_table: 'Table', values: dict[str, Any]):
+    def __init__(self, base_table: type['Table'], values: dict[str, Any]):
         self.base_table = base_table
 
         # Apply defaults from SQLAlchemy columns if available
@@ -563,13 +563,23 @@ class InsertBuilder(QueryBuilder):
         self._update_cols = update
         return self
 
-    def returning(self, *columns: str) -> 'InsertBuilder':
+    def returning(self, *columns: Union[str, Column]) -> 'InsertBuilder':
         """Add RETURNING clause (Postgres/SQLite only)
 
         Args:
-            columns: Column names to return, or none for RETURNING *
+            columns: Column names (strings) or Column objects to return, or none for RETURNING *
         """
-        self._returning_cols = list(columns) if columns else ['*']
+        if columns:
+            # Convert Column objects to their column names
+            col_names = []
+            for col in columns:
+                if isinstance(col, Column):
+                    col_names.append(col.column_name)
+                else:
+                    col_names.append(col)
+            self._returning_cols = col_names
+        else:
+            self._returning_cols = ['*']
         return self
 
     def to_tsql(self) -> TSQL:
@@ -677,7 +687,7 @@ class InsertBuilder(QueryBuilder):
 class UpdateBuilder(QueryBuilder):
     """Fluent interface for building UPDATE queries"""
 
-    def __init__(self, base_table: 'Table', values: dict[str, Any]):
+    def __init__(self, base_table: type['Table'], values: dict[str, Any]):
         self.base_table = base_table
 
         # Apply onupdate defaults from SQLAlchemy columns if available
@@ -726,13 +736,23 @@ class UpdateBuilder(QueryBuilder):
         self._requires_where = False
         return self
 
-    def returning(self, *columns: str) -> 'UpdateBuilder':
+    def returning(self, *columns: Union[str, Column]) -> 'UpdateBuilder':
         """Add RETURNING clause (Postgres/SQLite only)
 
         Args:
-            columns: Column names to return, or none for RETURNING *
+            columns: Column names (strings) or Column objects to return, or none for RETURNING *
         """
-        self._returning_cols = list(columns) if columns else ['*']
+        if columns:
+            # Convert Column objects to their column names
+            col_names = []
+            for col in columns:
+                if isinstance(col, Column):
+                    col_names.append(col.column_name)
+                else:
+                    col_names.append(col)
+            self._returning_cols = col_names
+        else:
+            self._returning_cols = ['*']
         return self
 
     def to_tsql(self) -> TSQL:
@@ -790,7 +810,7 @@ class UpdateBuilder(QueryBuilder):
 class DeleteBuilder(QueryBuilder):
     """Fluent interface for building DELETE queries"""
 
-    def __init__(self, base_table: 'Table'):
+    def __init__(self, base_table: type['Table']):
         self.base_table = base_table
         self._conditions: List[Union[Condition, Template]] = []
         self._returning_cols: Optional[List[str]] = None
@@ -817,13 +837,23 @@ class DeleteBuilder(QueryBuilder):
         self._requires_where = False
         return self
 
-    def returning(self, *columns: str) -> 'DeleteBuilder':
+    def returning(self, *columns: Union[str, Column]) -> 'DeleteBuilder':
         """Add RETURNING clause (Postgres/SQLite only)
 
         Args:
-            columns: Column names to return, or none for RETURNING *
+            columns: Column names (strings) or Column objects to return, or none for RETURNING *
         """
-        self._returning_cols = list(columns) if columns else ['*']
+        if columns:
+            # Convert Column objects to their column names
+            col_names = []
+            for col in columns:
+                if isinstance(col, Column):
+                    col_names.append(col.column_name)
+                else:
+                    col_names.append(col)
+            self._returning_cols = col_names
+        else:
+            self._returning_cols = ['*']
         return self
 
     def to_tsql(self) -> TSQL:
@@ -880,7 +910,7 @@ class DeleteBuilder(QueryBuilder):
 class SelectQueryBuilder(QueryBuilder):
     """Fluent interface for building SQL SELECT queries"""
 
-    def __init__(self, base_table: 'Table'):
+    def __init__(self, base_table: type['Table']):
         self.base_table = base_table
         self._columns: Optional[List[Column]] = None
         self._conditions: List[Condition] = []
@@ -918,16 +948,16 @@ class SelectQueryBuilder(QueryBuilder):
         self._conditions.append(condition)
         return self
 
-    def join(self, table: 'Table', on: Condition, join_type: str = 'INNER') -> 'SelectQueryBuilder':
+    def join(self, table: type['Table'], on: Condition, join_type: str = 'INNER') -> 'SelectQueryBuilder':
         """Add a JOIN clause"""
         self._joins.append(Join(table, on, join_type))
         return self
 
-    def left_join(self, table: 'Table', on: Condition) -> 'SelectQueryBuilder':
+    def left_join(self, table: type['Table'], on: Condition) -> 'SelectQueryBuilder':
         """Add a LEFT JOIN clause"""
         return self.join(table, on, 'LEFT')
 
-    def right_join(self, table: 'Table', on: Condition) -> 'SelectQueryBuilder':
+    def right_join(self, table: type['Table'], on: Condition) -> 'SelectQueryBuilder':
         """Add a RIGHT JOIN clause"""
         return self.join(table, on, 'RIGHT')
 

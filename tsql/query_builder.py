@@ -566,37 +566,49 @@ class QueryBuilder(ABC):
         database values back to Python values (e.g., decrypt encrypted fields,
         deserialize JSON, etc.).
 
-        Preserves the original row object type when possible by updating values
-        in place rather than creating new dictionaries.
+        Modifies row objects in place to preserve driver-specific row types
+        (e.g., asyncpg Record objects).
 
         Args:
-            rows: List of dictionaries from database query results
+            rows: List of row objects from database query results
 
         Returns:
-            List of dictionaries with transformed values
+            The same list of rows with transformed values (mutated in place)
 
         Example:
             query = User.select().where(User.id == 1)
             rows = await conn.fetch(*query.render())
-            transformed_rows = query.map_results(rows)  # ssn decrypted, metadata deserialized
+            query.map_results(rows)  # ssn decrypted, metadata deserialized (in place)
         """
         if not hasattr(self, 'base_table'):
             raise AttributeError("map_results requires a base_table attribute")
 
-        results = []
+        # Build a map of result_column_name -> processor
+        processors = {}
+
+        if hasattr(self, '_columns') and self._columns is not None:
+            # Explicit columns - we know exactly which ones and from which table
+            for col in self._columns:
+                if isinstance(col, Column) and col.type_processor:
+                    # The result key is the alias if present, otherwise column_name
+                    result_key = col.alias if col.alias else col.column_name
+                    processors[result_key] = col.type_processor
+        else:
+            # SELECT * - check all tables involved (base table + joins)
+            tables = [self.base_table]
+            if hasattr(self, '_joins'):
+                tables.extend(join.table for join in self._joins)
+
+            for table in tables:
+                processors.update(table._type_processors)
+
+        # Apply processors to rows in place
         for row in rows:
-            # Convert row to dict if it's not already (some drivers return Record objects)
-            row_dict = dict(row) if not isinstance(row, dict) else row
+            for col_name in list(row.keys()):
+                if col_name in processors:
+                    row[col_name] = processors[col_name].process_result_value(row[col_name])
 
-            # Apply type processors in place
-            for col_name in list(row_dict.keys()):
-                if col_name in self.base_table._type_processors:
-                    processor = self.base_table._type_processors[col_name]
-                    row_dict[col_name] = processor.process_result_value(row_dict[col_name])
-
-            results.append(row_dict)
-
-        return results
+        return rows
 
 
 class InsertBuilder(QueryBuilder):

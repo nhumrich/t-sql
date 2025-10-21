@@ -258,3 +258,61 @@ def test_type_processor_not_applied_to_column_comparisons():
     # No parameters should be generated (column-to-column comparison)
     assert len(params) == 0
     assert "user.ssn = user.backup_ssn" in sql
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="SQLAlchemy not installed")
+def test_map_results_with_joins_and_aliases():
+    """Test that map_results handles JOINs and column aliases correctly"""
+    metadata = MetaData()
+
+    class User(Table, metadata=metadata):
+        id = SAColumn(Integer, primary_key=True)
+        name = SAColumn(String(100))
+        ssn = SAColumn(String(255), type_processor=EncryptedString(key="secret123"))
+
+    class Profile(Table, metadata=metadata):
+        id = SAColumn(Integer, primary_key=True)
+        user_id = SAColumn(Integer)
+        metadata_col = SAColumn(String(255), type_processor=JSONType())
+
+    # Test with explicit columns including alias
+    query = (
+        User.select(User.id, User.name, User.ssn.as_('social'), Profile.metadata_col)
+        .join(Profile, on=User.id == Profile.user_id)
+    )
+
+    # Simulate database rows (using the format that EncryptedString produces)
+    rows = [
+        {
+            "id": 1,
+            "name": "Alice",
+            "social": "encrypted_123-45-6789_secret123",  # Aliased column
+            "metadata_col": '{"key": "value"}'
+        }
+    ]
+
+    query.map_results(rows)
+
+    # Check aliased column was decrypted
+    assert rows[0]["social"] == "123-45-6789"
+    # Check joined table column was deserialized
+    assert rows[0]["metadata_col"] == {"key": "value"}
+
+    # Test with SELECT * (should process all columns from all tables)
+    query_star = User.select().join(Profile, on=User.id == Profile.user_id)
+
+    rows_star = [
+        {
+            "id": 1,
+            "name": "Alice",
+            "ssn": "encrypted_987-65-4321_secret123",
+            "user_id": 1,
+            "metadata_col": '{"foo": "bar"}'
+        }
+    ]
+
+    query_star.map_results(rows_star)
+
+    # Both processors should be applied
+    assert rows_star[0]["ssn"] == "987-65-4321"
+    assert rows_star[0]["metadata_col"] == {"foo": "bar"}

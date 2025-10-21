@@ -362,6 +362,7 @@ def delete(table: str, id: str | int) -> TSQL:
 
 from tsql.query_builder import UnsafeQueryError
 from tsql.type_processor import TypeProcessor
+from tsql.row import Row
 
 __all__ = [
     'TSQL',
@@ -375,5 +376,6 @@ __all__ = [
     'set_style',
     'UnsafeQueryError',
     'TypeProcessor',
+    'Row',
 ]
 

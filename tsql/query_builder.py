@@ -4,6 +4,7 @@ from datetime import datetime
 from abc import ABC, abstractmethod
 
 from tsql import TSQL, t_join
+from tsql.row import Row
 
 
 class UnsafeQueryError(Exception):
@@ -559,26 +560,28 @@ class QueryBuilder(ABC):
         """
         return self.to_tsql().render(style)
 
-    def map_results(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def map_results(self, rows: List[Dict[str, Any]]) -> List[Row]:
         """Transform database rows with type processors applied.
 
         This method applies process_result_value from type processors to convert
         database values back to Python values (e.g., decrypt encrypted fields,
         deserialize JSON, etc.).
 
-        Modifies row objects in place to preserve driver-specific row types
-        (e.g., asyncpg Record objects).
+        Returns Row objects (dict subclass with attribute access) for consistent
+        API regardless of input type (dict, asyncpg Record, etc.).
 
         Args:
             rows: List of row objects from database query results
 
         Returns:
-            The same list of rows with transformed values (mutated in place)
+            List of Row objects with transformed values
 
         Example:
             query = User.select().where(User.id == 1)
             rows = await conn.fetch(*query.render())
-            query.map_results(rows)  # ssn decrypted, metadata deserialized (in place)
+            results = query.map_results(rows)
+            print(results[0].name)  # Attribute access
+            print(results[0]['name'])  # Dict access
         """
         if not hasattr(self, 'base_table'):
             raise AttributeError("map_results requires a base_table attribute")
@@ -602,13 +605,16 @@ class QueryBuilder(ABC):
             for table in tables:
                 processors.update(table._type_processors)
 
-        # Apply processors to rows in place
+        # Convert to Row objects and apply processors
+        results = []
         for row in rows:
-            for col_name in list(row.keys()):
+            row_dict = Row(row)  # Converts dict/Record to Row
+            for col_name in list(row_dict.keys()):
                 if col_name in processors:
-                    row[col_name] = processors[col_name].process_result_value(row[col_name])
+                    row_dict[col_name] = processors[col_name].process_result_value(row_dict[col_name])
+            results.append(row_dict)
 
-        return rows
+        return results
 
 
 class InsertBuilder(QueryBuilder):

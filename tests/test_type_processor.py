@@ -291,12 +291,14 @@ def test_map_results_with_joins_and_aliases():
         }
     ]
 
-    query.map_results(rows)
+    results = query.map_results(rows)
 
     # Check aliased column was decrypted
-    assert rows[0]["social"] == "123-45-6789"
+    assert results[0]["social"] == "123-45-6789"
+    assert results[0].social == "123-45-6789"  # Test attribute access
     # Check joined table column was deserialized
-    assert rows[0]["metadata_col"] == {"key": "value"}
+    assert results[0]["metadata_col"] == {"key": "value"}
+    assert results[0].metadata_col == {"key": "value"}  # Test attribute access
 
     # Test with SELECT * (should process all columns from all tables)
     query_star = User.select().join(Profile, on=User.id == Profile.user_id)
@@ -311,8 +313,10 @@ def test_map_results_with_joins_and_aliases():
         }
     ]
 
-    query_star.map_results(rows_star)
+    results_star = query_star.map_results(rows_star)
 
     # Both processors should be applied
-    assert rows_star[0]["ssn"] == "987-65-4321"
-    assert rows_star[0]["metadata_col"] == {"foo": "bar"}
+    assert results_star[0]["ssn"] == "987-65-4321"
+    assert results_star[0].ssn == "987-65-4321"  # Test attribute access
+    assert results_star[0]["metadata_col"] == {"foo": "bar"}
+    assert results_star[0].metadata_col == {"foo": "bar"}  # Test attribute access

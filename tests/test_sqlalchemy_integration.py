@@ -264,3 +264,159 @@ def test_sa_column_annotations_are_correct_type():
 def gen_id(prefix):
     """Dummy function for test"""
     return f"{prefix}_123"
+
+
+def test_table_with_unique_constraint():
+    """Test that UniqueConstraint is properly added to SA table"""
+    from sqlalchemy import UniqueConstraint
+
+    metadata = MetaData()
+
+    class Clients(Table, table_name='clients', metadata=metadata):
+        id = Column(String, primary_key=True)
+        tenant_id = Column(String, ForeignKey('tenants.id'))
+        email = Column(String, nullable=False)
+
+        constraints = [
+            UniqueConstraint('tenant_id', 'email', name='uq_clients_tenant_email')
+        ]
+
+    assert 'clients' in metadata.tables
+    sa_table = metadata.tables['clients']
+
+    # Find the unique constraint
+    unique_constraints = [c for c in sa_table.constraints if isinstance(c, UniqueConstraint)]
+    assert len(unique_constraints) == 1
+
+    uc = unique_constraints[0]
+    assert uc.name == 'uq_clients_tenant_email'
+    assert set(c.name for c in uc.columns) == {'tenant_id', 'email'}
+
+    # Query builder still works
+    query = Clients.select(Clients.id, Clients.email)
+    sql, params = query.render()
+    assert 'SELECT clients.id, clients.email FROM clients' in sql
+
+
+def test_table_with_check_constraint():
+    """Test that CheckConstraint is properly added to SA table"""
+    from sqlalchemy import CheckConstraint
+
+    metadata = MetaData()
+
+    class Products(Table, table_name='products', metadata=metadata):
+        id = Column(Integer, primary_key=True)
+        name = Column(String, nullable=False)
+        price = Column(Integer)
+
+        constraints = [
+            CheckConstraint('price > 0', name='ck_products_positive_price')
+        ]
+
+    sa_table = metadata.tables['products']
+
+    # Find the check constraint
+    check_constraints = [c for c in sa_table.constraints if isinstance(c, CheckConstraint)]
+    assert len(check_constraints) == 1
+
+    cc = check_constraints[0]
+    assert cc.name == 'ck_products_positive_price'
+
+
+def test_table_with_multiple_constraints():
+    """Test that multiple constraints can be added together"""
+    from sqlalchemy import UniqueConstraint, CheckConstraint, Index
+
+    metadata = MetaData()
+
+    class Orders(Table, table_name='orders', metadata=metadata):
+        id = Column(String, primary_key=True)
+        user_id = Column(String, nullable=False)
+        order_number = Column(String, nullable=False)
+        amount = Column(Integer)
+        status = Column(String)
+
+        constraints = [
+            UniqueConstraint('order_number', name='uq_orders_order_number'),
+            CheckConstraint('amount >= 0', name='ck_orders_non_negative_amount'),
+            Index('ix_orders_user_status', 'user_id', 'status')
+        ]
+
+    sa_table = metadata.tables['orders']
+
+    # Verify all constraints are present
+    unique_constraints = [c for c in sa_table.constraints if isinstance(c, UniqueConstraint)]
+    check_constraints = [c for c in sa_table.constraints if isinstance(c, CheckConstraint)]
+
+    assert len(unique_constraints) == 1
+    assert len(check_constraints) == 1
+
+    # Verify index
+    assert len(sa_table.indexes) == 1
+    idx = list(sa_table.indexes)[0]
+    assert idx.name == 'ix_orders_user_status'
+
+
+def test_table_with_constraints_as_tuple():
+    """Test that constraints attribute works with tuple format"""
+    from sqlalchemy import UniqueConstraint
+
+    metadata = MetaData()
+
+    class Items(Table, table_name='items', metadata=metadata):
+        id = Column(Integer, primary_key=True)
+        category = Column(String)
+        code = Column(String)
+
+        constraints = (
+            UniqueConstraint('category', 'code', name='uq_items_category_code'),
+        )
+
+    sa_table = metadata.tables['items']
+
+    unique_constraints = [c for c in sa_table.constraints if isinstance(c, UniqueConstraint)]
+    assert len(unique_constraints) == 1
+    assert unique_constraints[0].name == 'uq_items_category_code'
+
+
+def test_table_with_comment():
+    """Test that comment parameter is passed to SQLAlchemy table"""
+    metadata = MetaData()
+
+    class Settings(Table, table_name='settings', metadata=metadata, comment='Application settings and configuration'):
+        id = Column(Integer, primary_key=True)
+        key = Column(String, nullable=False)
+        value = Column(String)
+
+    sa_table = metadata.tables['settings']
+    assert sa_table.comment == 'Application settings and configuration'
+
+
+def test_table_with_constraints_and_comment():
+    """Test that both constraints and comment work together"""
+    from sqlalchemy import UniqueConstraint
+
+    metadata = MetaData()
+
+    class ApiKeys(Table, table_name='api_keys', metadata=metadata, comment='API authentication keys'):
+        id = Column(String, primary_key=True)
+        user_id = Column(String, nullable=False)
+        key_hash = Column(String, nullable=False)
+
+        constraints = [
+            UniqueConstraint('key_hash', name='uq_api_keys_key_hash')
+        ]
+
+    sa_table = metadata.tables['api_keys']
+
+    assert sa_table.comment == 'API authentication keys'
+
+    unique_constraints = [c for c in sa_table.constraints if isinstance(c, UniqueConstraint)]
+    assert len(unique_constraints) == 1
+    assert unique_constraints[0].name == 'uq_api_keys_key_hash'
+
+    # Query builder still works
+    query = ApiKeys.select().where(ApiKeys.user_id == 'user123')
+    sql, params = query.render()
+    assert 'WHERE api_keys.user_id = ?' in sql
+    assert params == ['user123']

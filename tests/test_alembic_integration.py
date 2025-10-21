@@ -361,3 +361,108 @@ def test_alembic_with_schema_parameter(temp_alembic_env):
 
 
 from sqlalchemy import text as sa_text
+
+
+def test_alembic_detects_unique_constraint(temp_alembic_env):
+    """Test that Alembic autogenerate detects UniqueConstraint"""
+    from sqlalchemy import UniqueConstraint
+
+    temp_dir, alembic_ini = temp_alembic_env
+    metadata = MetaData()
+    engine = create_engine("sqlite:///:memory:")
+
+    class Clients(Table, table_name='clients', metadata=metadata):
+        id = Column(String, primary_key=True)
+        tenant_id = Column(String)
+        email = Column(String, nullable=False)
+
+        constraints = [
+            UniqueConstraint('tenant_id', 'email', name='uq_clients_tenant_email')
+        ]
+
+    cfg = Config(str(alembic_ini))
+    cfg.attributes['target_metadata'] = metadata
+    cfg.attributes['connection'] = engine
+
+    with engine.begin() as connection:
+        mc = MigrationContext.configure(connection)
+        diff = compare_metadata(mc, metadata)
+
+    # Should detect the new table
+    add_table_ops = [op for op in diff if op[0] == 'add_table']
+    assert len(add_table_ops) == 1
+
+    table = add_table_ops[0][1]
+    assert table.name == 'clients'
+
+    # Verify the UniqueConstraint is in the table definition
+    unique_constraints = [c for c in table.constraints if isinstance(c, UniqueConstraint)]
+    assert len(unique_constraints) == 1
+
+    uc = unique_constraints[0]
+    assert uc.name == 'uq_clients_tenant_email'
+    assert set(c.name for c in uc.columns) == {'tenant_id', 'email'}
+
+
+def test_alembic_detects_check_constraint(temp_alembic_env):
+    """Test that Alembic autogenerate detects CheckConstraint"""
+    from sqlalchemy import CheckConstraint
+
+    temp_dir, alembic_ini = temp_alembic_env
+    metadata = MetaData()
+    engine = create_engine("sqlite:///:memory:")
+
+    class Products(Table, table_name='products', metadata=metadata):
+        id = Column(Integer, primary_key=True)
+        name = Column(String, nullable=False)
+        price = Column(Integer)
+
+        constraints = [
+            CheckConstraint('price > 0', name='ck_products_positive_price')
+        ]
+
+    cfg = Config(str(alembic_ini))
+    cfg.attributes['target_metadata'] = metadata
+    cfg.attributes['connection'] = engine
+
+    with engine.begin() as connection:
+        mc = MigrationContext.configure(connection)
+        diff = compare_metadata(mc, metadata)
+
+    add_table_ops = [op for op in diff if op[0] == 'add_table']
+    assert len(add_table_ops) == 1
+
+    table = add_table_ops[0][1]
+
+    # Verify the CheckConstraint is in the table definition
+    check_constraints = [c for c in table.constraints if isinstance(c, CheckConstraint)]
+    assert len(check_constraints) == 1
+
+    cc = check_constraints[0]
+    assert cc.name == 'ck_products_positive_price'
+
+
+def test_alembic_detects_table_comment(temp_alembic_env):
+    """Test that Alembic autogenerate preserves table comments"""
+    temp_dir, alembic_ini = temp_alembic_env
+    metadata = MetaData()
+    engine = create_engine("sqlite:///:memory:")
+
+    class Settings(Table, table_name='settings', metadata=metadata, comment='Application configuration'):
+        id = Column(Integer, primary_key=True)
+        key = Column(String, nullable=False)
+        value = Column(String)
+
+    cfg = Config(str(alembic_ini))
+    cfg.attributes['target_metadata'] = metadata
+    cfg.attributes['connection'] = engine
+
+    with engine.begin() as connection:
+        mc = MigrationContext.configure(connection)
+        diff = compare_metadata(mc, metadata)
+
+    add_table_ops = [op for op in diff if op[0] == 'add_table']
+    assert len(add_table_ops) == 1
+
+    table = add_table_ops[0][1]
+    assert table.comment == 'Application configuration'

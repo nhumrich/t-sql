@@ -516,6 +516,48 @@ query = Users.select().where(Users.age > 18)
 
 The `SAColumn` wrapper tells type checkers it returns a tsql `Column`, while at runtime it creates a SQLAlchemy `Column`. This gives you proper IDE completions for methods like `.is_null()`, `.like()`, etc.
 
+### Table Constraints
+
+For Alembic migrations, you can define table-level constraints using the `constraints` attribute:
+
+```python
+from sqlalchemy import MetaData, String, UniqueConstraint, CheckConstraint, Index
+from tsql.query_builder import Table, SAColumn
+
+metadata = MetaData()
+
+class Clients(Table, table_name='clients', metadata=metadata):
+    id = SAColumn(String, primary_key=True)
+    tenant_id = SAColumn(String)
+    email = SAColumn(String, nullable=False)
+
+    # Define table-level constraints
+    constraints = [
+        UniqueConstraint('tenant_id', 'email', name='uq_clients_tenant_email'),
+        CheckConstraint('length(email) > 0', name='ck_clients_email_not_empty'),
+        Index('ix_clients_tenant', 'tenant_id')
+    ]
+```
+
+The `constraints` attribute accepts both lists and tuples, and supports all SQLAlchemy constraint types:
+- `UniqueConstraint` - Multi-column unique constraints
+- `CheckConstraint` - Table-level check constraints
+- `Index` - Multi-column indexes
+- `ForeignKeyConstraint` - Table-level foreign keys
+
+**Note:** Single-column constraints like unique indexes and foreign keys can still be defined directly on `SAColumn` (e.g., `SAColumn(String, unique=True, index=True)`).
+
+### Table Comments
+
+Add database-level documentation with the `comment` parameter:
+
+```python
+class Users(Table, metadata=metadata, comment='Application user accounts'):
+    id = SAColumn(Integer, primary_key=True)
+    email = SAColumn(String(255), nullable=False)
+```
+
+Table comments appear in database introspection tools and migration files, making your schema self-documenting.
 
 ## Schema Support
 

@@ -210,11 +210,30 @@ class Table:
         class Users(Table, metadata=metadata):
             id: Column = SACol(Integer, primary_key=True)
             name: Column = SACol(String(100))
+
+    Table-level constraints (for SQLAlchemy/Alembic migrations):
+
+        from sqlalchemy import UniqueConstraint, CheckConstraint
+
+        class Users(Table, metadata=metadata):
+            id = SAColumn(String, primary_key=True)
+            tenant_id = SAColumn(String)
+            email = SAColumn(String)
+
+            constraints = [
+                UniqueConstraint('tenant_id', 'email', name='uq_users_tenant_email'),
+                CheckConstraint('length(email) > 0', name='ck_users_email_not_empty')
+            ]
+
+    Table comment (for database documentation in migrations):
+
+        class Users(Table, metadata=metadata, comment='Application user accounts'):
+            id = SAColumn(Integer, primary_key=True)
     """
     table_name: ClassVar[str]
     schema: ClassVar[Optional[str]] = None
 
-    def __init_subclass__(cls, table_name: Optional[str] = None, metadata: Optional[Any] = None, schema: Optional[str] = None, **kwargs):
+    def __init_subclass__(cls, table_name: Optional[str] = None, metadata: Optional[Any] = None, schema: Optional[str] = None, comment: Optional[str] = None, **kwargs):
         super().__init_subclass__(**kwargs)
 
         # Set table_name: use provided name, or default to lowercase class name
@@ -334,7 +353,17 @@ class Table:
 
         # Create SQLAlchemy Table if metadata provided
         if metadata is not None and HAS_SQLALCHEMY:
-            cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, schema=schema)
+            # Extract constraints from class attribute (supports both tuple and list)
+            table_constraints = getattr(cls, 'constraints', [])
+            if isinstance(table_constraints, tuple):
+                table_constraints = list(table_constraints)
+
+            # Build keyword args for SATable
+            table_kwargs = {'schema': schema}
+            if comment is not None:
+                table_kwargs['comment'] = comment
+
+            cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, *table_constraints, **table_kwargs)
 
         # Add the ALL column for wildcard column selection
         cls.ALL = Column(cls.table_name, '*', schema=schema)

@@ -38,11 +38,12 @@ class OrderByClause:
 class Column:
     """Represents a bound column (table + column name) for building queries"""
 
-    def __init__(self, table_name: str | None = None, column_name: str | None = None, alias: str | None = None, schema: str | None = None):
+    def __init__(self, table_name: str | None = None, column_name: str | None = None, alias: str | None = None, schema: str | None = None, type_processor: Any | None = None):
         self.table_name = table_name
         self.column_name = column_name
         self.alias = alias
         self.schema = schema
+        self.type_processor = type_processor
 
     def __str__(self) -> str:
         if self.schema:
@@ -70,29 +71,48 @@ class Column:
         Example:
             users.select(users.first_name.as_('first'), users.last_name.as_('last'))
         """
-        return Column(self.table_name, self.column_name, alias, self.schema)
+        return Column(self.table_name, self.column_name, alias, self.schema, self.type_processor)
+
+    def _process_value(self, value: Any) -> Any:
+        """Apply type processor to a comparison value if one is configured.
+
+        Args:
+            value: The value to process
+
+        Returns:
+            The processed value (or unchanged if no processor or value is special type)
+        """
+        # Don't process special types
+        if value is None or isinstance(value, (Column, Template)) or hasattr(value, 'to_tsql'):
+            return value
+
+        # Apply processor if present
+        if self.type_processor is not None:
+            return self.type_processor.process_bind_param(value)
+
+        return value
 
     def __eq__(self, other) -> 'Condition':
         if other is None:
             return Condition(self, 'IS', None)
-        return Condition(self, '=', other)
+        return Condition(self, '=', self._process_value(other))
 
     def __ne__(self, other) -> 'Condition':
         if other is None:
             return Condition(self, 'IS NOT', None)
-        return Condition(self, '!=', other)
+        return Condition(self, '!=', self._process_value(other))
 
     def __lt__(self, other) -> 'Condition':
-        return Condition(self, '<', other)
+        return Condition(self, '<', self._process_value(other))
 
     def __le__(self, other) -> 'Condition':
-        return Condition(self, '<=', other)
+        return Condition(self, '<=', self._process_value(other))
 
     def __gt__(self, other) -> 'Condition':
-        return Condition(self, '>', other)
+        return Condition(self, '>', self._process_value(other))
 
     def __ge__(self, other) -> 'Condition':
-        return Condition(self, '>=', other)
+        return Condition(self, '>=', self._process_value(other))
 
     def in_(self, values: Union[list, tuple, 'Column', Template, 'SelectQueryBuilder']) -> 'Condition':
         """Create an IN condition
@@ -101,7 +121,9 @@ class Column:
             values: List/tuple of values, a Column, a Template (t-string), or a SelectQueryBuilder for subqueries
         """
         if isinstance(values, (list, tuple)):
-            return Condition(self, 'IN', tuple(values))
+            # Process each value in the tuple/list
+            processed_values = tuple(self._process_value(v) for v in values)
+            return Condition(self, 'IN', processed_values)
         return Condition(self, 'IN', values)
 
     def not_in(self, values: Union[list, tuple, 'Column', Template, 'SelectQueryBuilder']) -> 'Condition':
@@ -111,24 +133,26 @@ class Column:
             values: List/tuple of values, a Column, a Template (t-string), or a SelectQueryBuilder for subqueries
         """
         if isinstance(values, (list, tuple)):
-            return Condition(self, 'NOT IN', tuple(values))
+            # Process each value in the tuple/list
+            processed_values = tuple(self._process_value(v) for v in values)
+            return Condition(self, 'NOT IN', processed_values)
         return Condition(self, 'NOT IN', values)
 
     def like(self, pattern: str) -> 'Condition':
         """Create a LIKE condition"""
-        return Condition(self, 'LIKE', pattern)
+        return Condition(self, 'LIKE', self._process_value(pattern))
 
     def not_like(self, pattern: str) -> 'Condition':
         """Create a NOT LIKE condition"""
-        return Condition(self, 'NOT LIKE', pattern)
+        return Condition(self, 'NOT LIKE', self._process_value(pattern))
 
     def ilike(self, pattern: str) -> 'Condition':
         """Create an ILIKE condition (case-insensitive, PostgreSQL/SQLite only)"""
-        return Condition(self, 'ILIKE', pattern)
+        return Condition(self, 'ILIKE', self._process_value(pattern))
 
     def not_ilike(self, pattern: str) -> 'Condition':
         """Create a NOT ILIKE condition (case-insensitive, PostgreSQL/SQLite only)"""
-        return Condition(self, 'NOT ILIKE', pattern)
+        return Condition(self, 'NOT ILIKE', self._process_value(pattern))
 
     def between(self, start: Any, end: Any) -> 'Condition':
         """Create a BETWEEN condition
@@ -137,7 +161,7 @@ class Column:
             start: Lower bound value
             end: Upper bound value
         """
-        return Condition(self, 'BETWEEN', (start, end))
+        return Condition(self, 'BETWEEN', (self._process_value(start), self._process_value(end)))
 
     def not_between(self, start: Any, end: Any) -> 'Condition':
         """Create a NOT BETWEEN condition
@@ -146,7 +170,7 @@ class Column:
             start: Lower bound value
             end: Upper bound value
         """
-        return Condition(self, 'NOT BETWEEN', (start, end))
+        return Condition(self, 'NOT BETWEEN', (self._process_value(start), self._process_value(end)))
 
     def is_null(self) -> 'Condition':
         """Create an IS NULL condition"""
@@ -242,6 +266,7 @@ class Table:
 
         annotations = getattr(cls, '__annotations__', {})
         sa_columns = []
+        cls._type_processors = {}
 
         # Collect all potential column fields
         all_fields = {}
@@ -295,12 +320,19 @@ class Table:
                     sa_col.name = field_name
                     sa_columns.append(sa_col)
 
+                # Extract type processor if present
+                type_processor = getattr(field_value, '_tsql_type_processor', None)
+
                 # Create query builder Column directly
-                setattr(cls, field_name, Column(cls.table_name, field_name, schema=schema))
+                setattr(cls, field_name, Column(cls.table_name, field_name, schema=schema, type_processor=type_processor))
                 # Update annotation to reflect the Column type
                 if not hasattr(cls, '__annotations__'):
                     cls.__annotations__ = {}
                 cls.__annotations__[field_name] = Column
+
+                # Store type processor in mapping if present
+                if type_processor is not None:
+                    cls._type_processors[field_name] = type_processor
                 continue
 
             # Check if it's a Column instance (for column_name remapping)
@@ -311,12 +343,19 @@ class Table:
                     # No column_name specified, use field_name
                     db_column_name = field_name
 
+                # Extract type processor if present
+                type_processor = field_value.type_processor
+
                 # Create query builder Column directly with the DB column name
-                setattr(cls, field_name, Column(cls.table_name, db_column_name, schema=schema))
+                setattr(cls, field_name, Column(cls.table_name, db_column_name, schema=schema, type_processor=type_processor))
                 # Update annotation to reflect the Column type
                 if not hasattr(cls, '__annotations__'):
                     cls.__annotations__ = {}
                 cls.__annotations__[field_name] = Column
+
+                # Store type processor in mapping if present
+                if type_processor is not None:
+                    cls._type_processors[field_name] = type_processor
 
                 # Create SQLAlchemy column if metadata provided
                 if metadata is not None and HAS_SQLALCHEMY:
@@ -520,6 +559,45 @@ class QueryBuilder(ABC):
         """
         return self.to_tsql().render(style)
 
+    def map_results(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Transform database rows with type processors applied.
+
+        This method applies process_result_value from type processors to convert
+        database values back to Python values (e.g., decrypt encrypted fields,
+        deserialize JSON, etc.).
+
+        Args:
+            rows: List of dictionaries from database query results
+
+        Returns:
+            List of dictionaries with transformed values
+
+        Example:
+            query = User.select().where(User.id == 1)
+            rows = await conn.fetch(*query.render())
+            transformed_rows = query.map_results(rows)  # ssn decrypted, metadata deserialized
+        """
+        if not hasattr(self, 'base_table'):
+            raise AttributeError("map_results requires a base_table attribute")
+
+        results = []
+        for row in rows:
+            # Convert row to dict if it's not already (some drivers return Record objects)
+            row_dict = dict(row) if not isinstance(row, dict) else row
+
+            # Apply type processors
+            transformed = {}
+            for col_name, value in row_dict.items():
+                if col_name in self.base_table._type_processors:
+                    processor = self.base_table._type_processors[col_name]
+                    transformed[col_name] = processor.process_result_value(value)
+                else:
+                    transformed[col_name] = value
+
+            results.append(transformed)
+
+        return results
+
 
 class InsertBuilder(QueryBuilder):
     """Fluent interface for building INSERT queries"""
@@ -619,7 +697,15 @@ class InsertBuilder(QueryBuilder):
             table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
         else:
             table_name = self.base_table.table_name
-        values_dict = self.values
+
+        # Apply type processors to values
+        values_dict = {}
+        for col_name, value in self.values.items():
+            if col_name in self.base_table._type_processors:
+                processor = self.base_table._type_processors[col_name]
+                values_dict[col_name] = processor.process_bind_param(value)
+            else:
+                values_dict[col_name] = value
 
         # MySQL INSERT IGNORE
         if self._ignore:
@@ -651,8 +737,14 @@ class InsertBuilder(QueryBuilder):
 
             # Build UPDATE SET clause
             if self._update_cols:
-                # User specified which columns to update
-                update_dict = self._update_cols
+                # User specified which columns to update - apply type processors
+                update_dict = {}
+                for col_name, value in self._update_cols.items():
+                    if col_name in self.base_table._type_processors:
+                        processor = self.base_table._type_processors[col_name]
+                        update_dict[col_name] = processor.process_bind_param(value)
+                    else:
+                        update_dict[col_name] = value
                 parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO UPDATE SET {update_dict:as_set}')
             else:
                 # Default: update all non-conflict columns with EXCLUDED.*
@@ -673,7 +765,14 @@ class InsertBuilder(QueryBuilder):
         # MySQL ON DUPLICATE KEY UPDATE
         elif self._on_conflict_action == 'duplicate_key':
             if self._update_cols:
-                update_dict = self._update_cols
+                # Apply type processors
+                update_dict = {}
+                for col_name, value in self._update_cols.items():
+                    if col_name in self.base_table._type_processors:
+                        processor = self.base_table._type_processors[col_name]
+                        update_dict[col_name] = processor.process_bind_param(value)
+                    else:
+                        update_dict[col_name] = value
                 parts.append(t'ON DUPLICATE KEY UPDATE {update_dict:as_set}')
             else:
                 # Default: update all columns with alias.column (new MySQL syntax)
@@ -792,7 +891,16 @@ class UpdateBuilder(QueryBuilder):
             table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
         else:
             table_name = self.base_table.table_name
-        values_dict = self.values
+
+        # Apply type processors to values
+        values_dict = {}
+        for col_name, value in self.values.items():
+            if col_name in self.base_table._type_processors:
+                processor = self.base_table._type_processors[col_name]
+                values_dict[col_name] = processor.process_bind_param(value)
+            else:
+                values_dict[col_name] = value
+
         parts.append(t'UPDATE {table_name:literal} SET {values_dict:as_set}')
 
         if self._conditions:
@@ -1128,7 +1236,7 @@ if HAS_SQLALCHEMY:
 
 
 # Helper function for type checker compatibility with SQLAlchemy columns
-def SAColumn(*args: Any, **kwargs: Any) -> Column:  # noqa: N802
+def SAColumn(*args: Any, type_processor: Any = None, **kwargs: Any) -> Column:  # noqa: N802
     """Wrapper for SQLAlchemy Column that satisfies type checkers.
 
     This function returns a SQLAlchemy Column at runtime but tells type checkers
@@ -1143,6 +1251,12 @@ def SAColumn(*args: Any, **kwargs: Any) -> Column:  # noqa: N802
             id = SAColumn(Integer, primary_key=True)  # Type checker sees: tsql Column
             name = SAColumn(String(100))
 
+        # With type processor:
+        from tsql.type_processor import TypeProcessor
+
+        class Users(Table):
+            ssn = SAColumn(String(255), type_processor=EncryptedString(key=MY_KEY))
+
     Note: This shadows the SQLAlchemy Column import. Import SA Column explicitly if needed:
         from sqlalchemy import Column as SA_Column
 
@@ -1153,4 +1267,7 @@ def SAColumn(*args: Any, **kwargs: Any) -> Column:  # noqa: N802
     if not HAS_SQLALCHEMY:
         raise ImportError("SQLAlchemy is not installed. Cannot use SAColumn() helper.")
     from sqlalchemy import Column as SA_Column
-    return SA_Column(*args, **kwargs)  # type: ignore[return-value]
+    sa_col = SA_Column(*args, **kwargs)
+    if type_processor is not None:
+        sa_col._tsql_type_processor = type_processor  # type: ignore[attr-defined]
+    return sa_col  # type: ignore[return-value]

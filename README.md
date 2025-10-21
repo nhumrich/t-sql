@@ -559,6 +559,82 @@ class Users(Table, metadata=metadata, comment='Application user accounts'):
 
 Table comments appear in database introspection tools and migration files, making your schema self-documenting.
 
+### Type Processors
+
+Type processors enable automatic value transformation when reading from and writing to the database, similar to SQLAlchemy's `TypeDecorator`. This is useful for encryption, serialization, and custom data transformations.
+
+```python
+from tsql import TypeProcessor
+from tsql.query_builder import Table, SAColumn
+from sqlalchemy import Integer, String, MetaData
+import json
+
+metadata = MetaData()
+
+# Define custom type processors
+class EncryptedString(TypeProcessor):
+    def __init__(self, key):
+        self.key = key
+
+    def process_bind_param(self, value):
+        """Transform Python value -> DB value (encrypt on write)"""
+        if value is None:
+            return None
+        return encrypt(value, self.key)
+
+    def process_result_value(self, value):
+        """Transform DB value -> Python value (decrypt on read)"""
+        if value is None:
+            return None
+        return decrypt(value, self.key)
+
+class JSONType(TypeProcessor):
+    def process_bind_param(self, value):
+        """Serialize Python dict/list -> JSON string"""
+        return json.dumps(value) if value is not None else None
+
+    def process_result_value(self, value):
+        """Deserialize JSON string -> Python dict/list"""
+        return json.loads(value) if value is not None else None
+
+# Use type processors in table definition
+class User(Table, metadata=metadata):
+    id = SAColumn(Integer, primary_key=True)
+    ssn = SAColumn(String(255), type_processor=EncryptedString(key="secret"))
+    metadata_ = SAColumn(String, type_processor=JSONType())
+    email = SAColumn(String(255))  # No processor = no transformation
+
+# Write - automatic encryption/serialization
+User.insert(ssn="123-45-6789", metadata_={"role": "admin"})
+# SQL: INSERT INTO user (ssn, metadata_) VALUES (?, ?)
+# Params: [encrypt("123-45-6789", "secret"), '{"role": "admin"}']
+
+User.update(ssn="new-ssn").where(User.id == 1)
+# SQL: UPDATE user SET ssn = ? WHERE user.id = ?
+# Params: [encrypt("new-ssn", "secret"), 1]
+
+# Where clauses - automatic transformation
+User.select().where(User.ssn == "123-45-6789")
+# SQL: SELECT * FROM user WHERE user.ssn = ?
+# Params: [encrypt("123-45-6789", "secret")]
+
+# Read - manual decryption/deserialization with map_results()
+query = User.select().where(User.id == 1)
+sql, params = query.render()
+rows = await connection.fetch(sql, *params)  # Returns encrypted/serialized data
+transformed_rows = query.map_results(rows)   # Applies type processors
+# transformed_rows = [{"id": 1, "ssn": "123-45-6789", "metadata_": {"role": "admin"}, ...}]
+```
+
+**Key features:**
+- **Write-side**: Automatically applied in `INSERT`, `UPDATE`, and `WHERE` clauses
+- **Read-side**: Manual via `query.map_results(rows)` - you control when transformation happens
+- **NULL handling**: NULL values are passed through to processors (they decide how to handle)
+- **Column comparisons**: Type processors are NOT applied when comparing columns to other columns
+
+**Why manual read-side transformation?**
+The query builder stays database-agnostic and doesn't execute queries directly. You control when to apply transformations after fetching results from your specific database driver.
+
 ## Schema Support
 
 ```python

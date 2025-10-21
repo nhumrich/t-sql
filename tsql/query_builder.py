@@ -566,6 +566,9 @@ class QueryBuilder(ABC):
         database values back to Python values (e.g., decrypt encrypted fields,
         deserialize JSON, etc.).
 
+        Preserves the original row object type when possible by updating values
+        in place rather than creating new dictionaries.
+
         Args:
             rows: List of dictionaries from database query results
 
@@ -585,16 +588,13 @@ class QueryBuilder(ABC):
             # Convert row to dict if it's not already (some drivers return Record objects)
             row_dict = dict(row) if not isinstance(row, dict) else row
 
-            # Apply type processors
-            transformed = {}
-            for col_name, value in row_dict.items():
+            # Apply type processors in place
+            for col_name in list(row_dict.keys()):
                 if col_name in self.base_table._type_processors:
                     processor = self.base_table._type_processors[col_name]
-                    transformed[col_name] = processor.process_result_value(value)
-                else:
-                    transformed[col_name] = value
+                    row_dict[col_name] = processor.process_result_value(row_dict[col_name])
 
-            results.append(transformed)
+            results.append(row_dict)
 
         return results
 

@@ -1,10 +1,13 @@
 import re
 import string
 import datetime
+import logging
 from typing import NamedTuple, Tuple, Any, List, Dict, Iterable, Union, TYPE_CHECKING
 from string.templatelib import Template, Interpolation
 
 from tsql.styles import ParamStyle, QMARK
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from tsql.query_builder import QueryBuilder
@@ -13,6 +16,7 @@ default_style = QMARK
 
 def set_style(style: type[ParamStyle]):
     global default_style
+    logger.debug("Setting default parameter style to: %s", style.__name__)
     default_style = style
 
 
@@ -50,6 +54,7 @@ class TSQL:
     def render(self, style:ParamStyle = None) -> RenderedQuery:
         if style is None:
             style = default_style
+        logger.debug("Rendering query with style: %s", style.__name__)
         result = ''
 
         style_instance = style()
@@ -61,6 +66,8 @@ class TSQL:
             else:
                 result += part
 
+        logger.debug("Rendered SQL: %s", result)
+        logger.debug("Parameters (%d): %s", len(style_instance.params), style_instance.params)
         return RenderedQuery(result, style_instance.params)
 
 
@@ -114,11 +121,17 @@ class TSQL:
             if val.conversion:
                 value = formatter.convert_field(value, val.conversion)
 
+            logger.debug("Processing interpolation: expression=%r, format_spec=%r, value_type=%s",
+                        val.expression, val.format_spec, type(value).__name__)
+
             match val.format_spec, value:
                 case 'literal', str():
+                    logger.debug("Validating literal: %r", value)
                     cls._check_literal(value)
+                    logger.debug("Literal validated, inlining: %r", value)
                     return [value]
                 case 'unsafe', str():
+                    logger.debug("Using unsafe inline value: %r", value)
                     return [value]
                 case 'as_values', dict():
                     return as_values(value)._sql_parts

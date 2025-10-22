@@ -719,11 +719,8 @@ class InsertBuilder(QueryBuilder):
         # Apply type processors to values
         values_dict = {}
         for col_name, value in self.values.items():
-            if col_name in self.base_table._type_processors:
-                processor = self.base_table._type_processors[col_name]
-                values_dict[col_name] = processor.process_bind_param(value)
-            else:
-                values_dict[col_name] = value
+            processor = self.base_table._type_processors.get(col_name)
+            values_dict[col_name] = _process_value_for_builder(value, processor)
 
         # MySQL INSERT IGNORE
         if self._ignore:
@@ -758,11 +755,8 @@ class InsertBuilder(QueryBuilder):
                 # User specified which columns to update - apply type processors
                 update_dict = {}
                 for col_name, value in self._update_cols.items():
-                    if col_name in self.base_table._type_processors:
-                        processor = self.base_table._type_processors[col_name]
-                        update_dict[col_name] = processor.process_bind_param(value)
-                    else:
-                        update_dict[col_name] = value
+                    processor = self.base_table._type_processors.get(col_name)
+                    update_dict[col_name] = _process_value_for_builder(value, processor)
                 parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO UPDATE SET {update_dict:as_set}')
             else:
                 # Default: update all non-conflict columns with EXCLUDED.*
@@ -786,11 +780,8 @@ class InsertBuilder(QueryBuilder):
                 # Apply type processors
                 update_dict = {}
                 for col_name, value in self._update_cols.items():
-                    if col_name in self.base_table._type_processors:
-                        processor = self.base_table._type_processors[col_name]
-                        update_dict[col_name] = processor.process_bind_param(value)
-                    else:
-                        update_dict[col_name] = value
+                    processor = self.base_table._type_processors.get(col_name)
+                    update_dict[col_name] = _process_value_for_builder(value, processor)
                 parts.append(t'ON DUPLICATE KEY UPDATE {update_dict:as_set}')
             else:
                 # Default: update all columns with alias.column (new MySQL syntax)
@@ -828,6 +819,30 @@ class InsertBuilder(QueryBuilder):
             return f"InsertBuilder({query})"
         except Exception as e:
             return f"InsertBuilder(<error rendering: {e}>)"
+
+
+def _process_value_for_builder(value: Any, type_processor: Any = None) -> Any:
+    """Apply type processor to a value if appropriate.
+
+    This helper ensures Template, TSQL, and QueryBuilder objects are not processed
+    by TypeProcessors, allowing them to be inlined as SQL instead of parameterized.
+
+    Args:
+        value: The value to potentially process
+        type_processor: Optional TypeProcessor instance
+
+    Returns:
+        Processed value (or unchanged if special type or no processor)
+    """
+    # Don't process special types that should be inlined as SQL
+    if isinstance(value, (Column, Template)) or hasattr(value, 'to_tsql'):
+        return value
+
+    # Apply processor if present (this handles None correctly - processors can transform it)
+    if type_processor is not None:
+        return type_processor.process_bind_param(value)
+
+    return value
 
 
 class UpdateBuilder(QueryBuilder):
@@ -913,11 +928,8 @@ class UpdateBuilder(QueryBuilder):
         # Apply type processors to values
         values_dict = {}
         for col_name, value in self.values.items():
-            if col_name in self.base_table._type_processors:
-                processor = self.base_table._type_processors[col_name]
-                values_dict[col_name] = processor.process_bind_param(value)
-            else:
-                values_dict[col_name] = value
+            processor = self.base_table._type_processors.get(col_name)
+            values_dict[col_name] = _process_value_for_builder(value, processor)
 
         parts.append(t'UPDATE {table_name:literal} SET {values_dict:as_set}')
 

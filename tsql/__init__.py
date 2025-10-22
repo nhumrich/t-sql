@@ -182,7 +182,20 @@ def as_values(value_dict: dict[str, Any]):
     for i, value in enumerate(values):
         if i > 0:
             value_parts.append(', ')
-        value_parts.append(Parameter(f'value_{i}', value))
+
+        # Handle special types that should be inlined as SQL
+        if isinstance(value, Template):
+            # Inline the Template by processing it through _sqlize
+            value_parts.extend(TSQL._sqlize(value))
+        elif isinstance(value, TSQL):
+            # Inline the TSQL object's parts directly
+            value_parts.extend(value._sql_parts)
+        elif hasattr(value, 'to_tsql'):
+            # Handle QueryBuilder objects
+            value_parts.extend(value.to_tsql()._sql_parts)
+        else:
+            # Normal value - create Parameter
+            value_parts.append(Parameter(f'value_{i}', value))
     value_parts.append(')')
 
     # Create TSQL object manually
@@ -211,7 +224,20 @@ def as_set(value_dict: dict[str, Any]):
             set_parts.append(', ')
         set_parts.append(key)
         set_parts.append(' = ')
-        set_parts.append(Parameter(f'value_{i}', value))
+
+        # Handle special types that should be inlined as SQL
+        if isinstance(value, Template):
+            # Inline the Template by processing it through _sqlize
+            set_parts.extend(TSQL._sqlize(value))
+        elif isinstance(value, TSQL):
+            # Inline the TSQL object's parts directly
+            set_parts.extend(value._sql_parts)
+        elif hasattr(value, 'to_tsql'):
+            # Handle QueryBuilder objects
+            set_parts.extend(value.to_tsql()._sql_parts)
+        else:
+            # Normal value - create Parameter
+            set_parts.append(Parameter(f'value_{i}', value))
 
     # Create TSQL object manually
     tsql_obj = TSQL.__new__(TSQL)

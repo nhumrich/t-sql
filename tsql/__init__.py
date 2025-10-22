@@ -1,5 +1,6 @@
 import re
 import string
+import datetime
 from typing import NamedTuple, Tuple, Any, List, Dict, Iterable, Union, TYPE_CHECKING
 from string.templatelib import Template, Interpolation
 
@@ -127,6 +128,8 @@ class TSQL:
                     return [Parameter(val.expression, value)]
                 case _, int():
                     return [Parameter(val.expression, val.value)]
+                case '', datetime.datetime() | datetime.date() | datetime.time() | datetime.timedelta():
+                    return [Parameter(val.expression, value)]
                 case _, _:
                     return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
 

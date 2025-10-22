@@ -1,4 +1,5 @@
 import asyncpg
+import datetime
 import os
 import pytest
 
@@ -235,3 +236,36 @@ async def test_escaped_handles_comment_injection(conn):
     query, _ = tsql.render(t"SELECT * FROM test_users WHERE name = {malicious_input}", style=tsql.styles.ESCAPED)
     rows = await conn.fetch(query)
     assert len(rows) == 0
+
+
+async def test_datetime_comparison_with_asyncpg(conn):
+    """Test that datetime objects work correctly with asyncpg (bug fix verification)"""
+    # Insert some test data with specific timestamps
+    base_time = datetime.datetime.now()
+
+    await conn.execute(
+        "INSERT INTO test_users (name, created_at) VALUES ($1, $2), ($3, $4), ($5, $6)",
+        'User1', base_time - datetime.timedelta(minutes=30),
+        'User2', base_time - datetime.timedelta(minutes=10),
+        'User3', base_time - datetime.timedelta(minutes=5)
+    )
+
+    # Use a datetime object in a WHERE clause (this was broken before the fix)
+    cutoff_time = base_time - datetime.timedelta(minutes=15)
+
+    query, params = tsql.render(
+        t"SELECT name FROM test_users WHERE created_at > {cutoff_time}",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    # Verify the parameter is still a datetime object (not stringified)
+    assert len(params) == 1
+    assert isinstance(params[0], datetime.datetime)
+
+    # This should work without asyncpg throwing a DataError
+    rows = await conn.fetch(query, *params)
+
+    # Should find User2 and User3 (created within last 15 minutes)
+    assert len(rows) == 2
+    names = sorted([row['name'] for row in rows])
+    assert names == ['User2', 'User3']

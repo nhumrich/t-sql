@@ -9,6 +9,9 @@ from tsql.styles import ParamStyle, QMARK
 
 logger = logging.getLogger(__name__)
 
+# Pre-compile regex for whitespace collapsing to avoid cache lookup overhead
+_WHITESPACE_RE = re.compile(r'\s+')
+
 if TYPE_CHECKING:
     from tsql.query_builder import QueryBuilder
 
@@ -170,7 +173,7 @@ class TSQL:
                 if isinstance(item, Interpolation):
                     result.extend(cls._sqlize(item))
                 else:
-                    result.append(re.sub(r'\s+', ' ', item))
+                    result.append(_WHITESPACE_RE.sub(' ', item))
             return result
 
         raise ValueError(f"UNSAFE {val}") # this shouldnt happen and is for debugging

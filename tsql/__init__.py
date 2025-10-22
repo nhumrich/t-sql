@@ -75,16 +75,34 @@ class TSQL:
     @classmethod
     def _check_literal(cls, val: str):
         if not isinstance(val, str):
-            raise ValueError(f"Invalid literal {val}")
+            raise ValueError(
+                f"Invalid literal {val!r}: literals must be strings, got {type(val).__name__}. "
+                f"Use {{value}} without :literal to parameterize non-string values."
+            )
 
         # Allow qualified identifiers (table.column, schema.table.column)
         parts = val.split('.')
 
         if len(parts) > 3:
-            raise ValueError(f"Invalid literal {val}: too many parts (max 3 for schema.table.column)")
+            raise ValueError(
+                f"Invalid literal {val!r}: too many parts (expected at most 3 for schema.table.column, got {len(parts)}). "
+                f"Parts: {', '.join(repr(p) for p in parts)}"
+            )
 
-        if not parts or not all(part.isidentifier() for part in parts):
-            raise ValueError(f"Invalid literal {val}")
+        # Check for empty string or empty parts
+        if not val or any(not p for p in parts):
+            raise ValueError(
+                f"Invalid literal {val!r}: empty string is not a valid identifier. "
+                f"Literals must be valid Python identifiers (e.g., 'users', 'public.users', 'schema.table.column')."
+            )
+
+        invalid_parts = [p for p in parts if not p.isidentifier()]
+        if invalid_parts:
+            raise ValueError(
+                f"Invalid literal {val!r}: contains invalid identifier(s): {', '.join(repr(p) for p in invalid_parts)}. "
+                f"Each part must be a valid Python identifier (letters, digits, underscores; cannot start with digit). "
+                f"If you need special characters or SQL keywords, consider using {{value:unsafe}} with caution."
+            )
         return val
 
     @classmethod

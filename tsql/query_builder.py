@@ -14,6 +14,18 @@ class UnsafeQueryError(Exception):
     """
     pass
 
+
+class _StringTable:
+    """Minimal table representation for string-based queries.
+
+    This acts like a Table class but without the Column descriptors.
+    Used internally when queries are built with string table names.
+    """
+    def __init__(self, table_name: str, schema: Optional[str] = None):
+        self.table_name = table_name
+        self.schema = schema
+        self._type_processors = {}
+
 # Optional SQLAlchemy support
 try:
     from sqlalchemy import MetaData, Table as SATable, Column as SAColumn
@@ -620,7 +632,7 @@ class QueryBuilder(ABC):
 class InsertBuilder(QueryBuilder):
     """Fluent interface for building INSERT queries"""
 
-    def __init__(self, base_table: type['Table'], values: dict[str, Any]):
+    def __init__(self, base_table: Union[type['Table'], _StringTable], values: dict[str, Any]):
         self.base_table = base_table
 
         # Apply defaults from SQLAlchemy columns if available
@@ -649,6 +661,26 @@ class InsertBuilder(QueryBuilder):
         self._conflict_cols: Optional[List[str]] = None
         self._update_cols: Optional[dict[str, Any]] = None
         self._returning_cols: Optional[List[str]] = None
+
+    @classmethod
+    def into_table(cls, table_name: str, values: dict[str, Any], schema: Optional[str] = None) -> 'InsertBuilder':
+        """Create an InsertBuilder from a string table name.
+
+        Args:
+            table_name: Name of the table
+            values: Dictionary of column names and values
+            schema: Optional schema name
+
+        Returns:
+            InsertBuilder instance
+
+        Example:
+            InsertBuilder.into_table('users', {'name': 'Bob', 'email': 'bob@test.com'}) \\
+                .on_conflict_do_nothing('email') \\
+                .returning('id')
+        """
+        string_table = _StringTable(table_name, schema)
+        return cls(string_table, values)
 
     def ignore(self) -> 'InsertBuilder':
         """Add INSERT IGNORE (MySQL)"""
@@ -848,7 +880,7 @@ def _process_value_for_builder(value: Any, type_processor: Any = None) -> Any:
 class UpdateBuilder(QueryBuilder):
     """Fluent interface for building UPDATE queries"""
 
-    def __init__(self, base_table: type['Table'], values: dict[str, Any]):
+    def __init__(self, base_table: Union[type['Table'], _StringTable], values: dict[str, Any]):
         self.base_table = base_table
 
         # Apply onupdate defaults from SQLAlchemy columns if available
@@ -875,6 +907,25 @@ class UpdateBuilder(QueryBuilder):
         self._conditions: List[Union[Condition, Template]] = []
         self._returning_cols: Optional[List[str]] = None
         self._requires_where: bool = True
+
+    @classmethod
+    def table(cls, table_name: str, values: dict[str, Any], schema: Optional[str] = None) -> 'UpdateBuilder':
+        """Create an UpdateBuilder from a string table name.
+
+        Args:
+            table_name: Name of the table
+            values: Dictionary of column names and values to update
+            schema: Optional schema name
+
+        Returns:
+            UpdateBuilder instance
+
+        Example:
+            UpdateBuilder.table('users', {'status': 'inactive'}, schema='public') \\
+                .where(t'last_login < {cutoff_date}')
+        """
+        string_table = _StringTable(table_name, schema)
+        return cls(string_table, values)
 
     def where(self, condition: Union[Condition, Template]) -> 'UpdateBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
@@ -977,11 +1028,29 @@ class UpdateBuilder(QueryBuilder):
 class DeleteBuilder(QueryBuilder):
     """Fluent interface for building DELETE queries"""
 
-    def __init__(self, base_table: type['Table']):
+    def __init__(self, base_table: Union[type['Table'], _StringTable]):
         self.base_table = base_table
         self._conditions: List[Union[Condition, Template]] = []
         self._returning_cols: Optional[List[str]] = None
         self._requires_where: bool = True
+
+    @classmethod
+    def from_table(cls, table_name: str, schema: Optional[str] = None) -> 'DeleteBuilder':
+        """Create a DeleteBuilder from a string table name.
+
+        Args:
+            table_name: Name of the table
+            schema: Optional schema name
+
+        Returns:
+            DeleteBuilder instance
+
+        Example:
+            DeleteBuilder.from_table('users', schema='public') \\
+                .where(t'created_at < {cutoff}')
+        """
+        string_table = _StringTable(table_name, schema)
+        return cls(string_table)
 
     def where(self, condition: Union[Condition, Template]) -> 'DeleteBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
@@ -1077,22 +1146,41 @@ class DeleteBuilder(QueryBuilder):
 class SelectQueryBuilder(QueryBuilder):
     """Fluent interface for building SQL SELECT queries"""
 
-    def __init__(self, base_table: type['Table']):
+    def __init__(self, base_table: Union[type['Table'], _StringTable]):
         self.base_table = base_table
-        self._columns: Optional[List[Column]] = None
-        self._conditions: List[Condition] = []
+        self._columns: Optional[List[Union[Column, str]]] = None
+        self._conditions: List[Union[Condition, Template]] = []
         self._joins: List[Join] = []
-        self._group_by_columns: List[Column] = []
+        self._group_by_columns: List[Union[Column, str]] = []
         self._having_conditions: List[Union[Condition, Template]] = []
-        self._order_by_columns: List[tuple[Column, str]] = []
+        self._order_by_columns: List[tuple[Union[Column, str], str]] = []
         self._limit_value: Optional[int] = None
         self._offset_value: Optional[int] = None
 
-    def select(self, *columns: Union[Column, Template]) -> 'SelectQueryBuilder':
+    @classmethod
+    def from_table(cls, table_name: str, schema: Optional[str] = None) -> 'SelectQueryBuilder':
+        """Create a SelectQueryBuilder from a string table name.
+
+        Args:
+            table_name: Name of the table
+            schema: Optional schema name
+
+        Returns:
+            SelectQueryBuilder instance
+
+        Example:
+            SelectQueryBuilder.from_table('users', schema='public') \\
+                .select('id', 'name') \\
+                .where(t'status = {status}')
+        """
+        string_table = _StringTable(table_name, schema)
+        return cls(string_table)
+
+    def select(self, *columns: Union[Column, Template, str]) -> 'SelectQueryBuilder':
         """Specify columns to select
 
         Args:
-            columns: Column objects (optionally with .as_() aliases) or raw t-string Templates
+            columns: Column objects (optionally with .as_() aliases), raw t-string Templates, or string column names
 
         Examples:
             # Using Column.as_() for aliases
@@ -1100,6 +1188,9 @@ class SelectQueryBuilder(QueryBuilder):
 
             # Mixing Column objects and raw t-strings
             users.select(users.id, users.email, t'users.first_name AS first')
+
+            # String-based columns
+            SelectQueryBuilder.from_table('users').select('id', 'name', 'email')
 
             # No columns specified selects all (SELECT *)
             users.select()
@@ -1128,11 +1219,12 @@ class SelectQueryBuilder(QueryBuilder):
         """Add a RIGHT JOIN clause"""
         return self.join(table, on, 'RIGHT')
 
-    def order_by(self, *columns: Union[Column, OrderByClause]) -> 'SelectQueryBuilder':
+    def order_by(self, *columns: Union[Column, OrderByClause, str], direction: str = 'ASC') -> 'SelectQueryBuilder':
         """Add ORDER BY clause
 
         Args:
-            columns: Column objects or OrderByClause objects (from .asc()/.desc())
+            columns: Column objects, OrderByClause objects (from .asc()/.desc()), or string column names
+            direction: Sort direction ('ASC' or 'DESC') for columns that don't have explicit direction
 
         Examples:
             # Using .asc() and .desc() methods
@@ -1140,16 +1232,31 @@ class SelectQueryBuilder(QueryBuilder):
 
             # Bare column defaults to ASC
             Users.select().order_by(Users.username)
+
+            # String-based ordering with explicit direction
+            SelectQueryBuilder.from_table('users').order_by('username', direction='DESC')
+
+            # Multiple columns in one call
+            Users.select().order_by(Users.username, Users.id.desc())
         """
-        for col in columns:
-            if isinstance(col, OrderByClause):
-                self._order_by_columns.append((col.column, col.direction))
+        for column in columns:
+            if isinstance(column, OrderByClause):
+                self._order_by_columns.append((column.column, column.direction))
             else:
-                self._order_by_columns.append((col, 'ASC'))
+                # Column or string with direction
+                self._order_by_columns.append((column, direction.upper()))
         return self
 
-    def group_by(self, *columns: Column) -> 'SelectQueryBuilder':
-        """Add GROUP BY clause"""
+    def group_by(self, *columns: Union[Column, str]) -> 'SelectQueryBuilder':
+        """Add GROUP BY clause
+
+        Args:
+            columns: Column objects or string column names
+
+        Examples:
+            # String-based GROUP BY
+            SelectQueryBuilder.from_table('orders').select('user_id', 'COUNT(*)').group_by('user_id')
+        """
         self._group_by_columns.extend(columns)
         return self
 
@@ -1176,11 +1283,14 @@ class SelectQueryBuilder(QueryBuilder):
         parts: List[Template] = []
 
         if self._columns:
-            # Build column list, handling both Column objects and Template (t-string) objects
+            # Build column list, handling Column objects, Template (t-string) objects, and strings
             column_parts = []
             for col in self._columns:
                 if isinstance(col, Template):
                     column_parts.append(col)
+                elif isinstance(col, str):
+                    # String column name, use :literal for validation
+                    column_parts.append(t'{col:literal}')
                 else:
                     # Column object, convert to string
                     column_parts.append(t'{str(col):unsafe}')
@@ -1210,9 +1320,15 @@ class SelectQueryBuilder(QueryBuilder):
             parts.append(t'WHERE {combined_where}')
 
         if self._group_by_columns:
-            group_by_strs = [str(col) for col in self._group_by_columns]
-            group_by_str = ', '.join(group_by_strs)
-            parts.append(t'GROUP BY {group_by_str:unsafe}')
+            group_by_parts = []
+            for col in self._group_by_columns:
+                if isinstance(col, str):
+                    group_by_parts.append(t'{col:literal}')
+                else:
+                    col_str = str(col)
+                    group_by_parts.append(t'{col_str:unsafe}')
+            group_by_template = t_join(t', ', group_by_parts)
+            parts.append(t'GROUP BY {group_by_template}')
 
         if self._having_conditions:
             having_parts = []
@@ -1225,9 +1341,17 @@ class SelectQueryBuilder(QueryBuilder):
             parts.append(t'HAVING {combined_having}')
 
         if self._order_by_columns:
-            order_strs = [f"{col} {direction}" for col, direction in self._order_by_columns]
-            order_by_str = ', '.join(order_strs)
-            parts.append(t'ORDER BY {order_by_str:unsafe}')
+            order_parts = []
+            for col, direction in self._order_by_columns:
+                if isinstance(col, str):
+                    # String column name - validate with :literal
+                    order_parts.append(t'{col:literal} {direction:unsafe}')
+                else:
+                    # Column object - convert to string
+                    col_str = str(col)
+                    order_parts.append(t'{col_str:unsafe} {direction:unsafe}')
+            order_by_template = t_join(t', ', order_parts)
+            parts.append(t'ORDER BY {order_by_template}')
 
         if self._limit_value is not None:
             limit_val = self._limit_value

@@ -436,6 +436,42 @@ The query builder is database-agnostic - all methods are available regardless of
 
 If you use an unsupported method, your database will raise a syntax error when you execute the query.
 
+## String-Based Query Builder
+
+t-sql also supports building queries with string table/column names instead of Table class definitions:
+
+```python
+from tsql.query_builder import SelectQueryBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder
+
+# SELECT
+user_id = 123
+status = 'active'
+query = SelectQueryBuilder.from_table('users', schema='public') \
+    .select('id', 'name', 'email') \
+    .where(t'id = {user_id} AND status = {status}') \
+    .order_by('created_at', direction='DESC') \
+    .limit(10)
+
+sql, params = query.render()
+
+# INSERT
+query = InsertBuilder.into_table('users', {'name': 'Bob', 'email': 'bob@test.com'}) \
+    .on_conflict_do_nothing('email') \
+    .returning('id')
+
+# UPDATE
+cutoff_date = '2024-01-01'
+query = UpdateBuilder.table('users', {'status': 'inactive'}) \
+    .where(t'last_login < {cutoff_date}')
+
+# DELETE
+cutoff = '2023-01-01'
+query = DeleteBuilder.from_table('users') \
+    .where(t'created_at < {cutoff}')
+```
+
+String identifiers are validated using the same `:literal` format spec as the core library, providing the same SQL injection protection.
+
 ## Mixing Query Builder with T-Strings
 
 You can combine the query builder with raw t-strings for complex logic:

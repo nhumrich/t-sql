@@ -1378,3 +1378,56 @@ def test_delete_with_all_rows_works():
     assert 'DELETE FROM users' in sql
     assert 'WHERE' not in sql
     assert params == []
+
+
+def test_nested_querybuilder_in_tstring():
+    """Test that QueryBuilder can be interpolated into t-strings as subqueries"""
+    # Create a subquery
+    subquery = Posts.select(Posts.user_id).where(Posts.id == 42)
+
+    # Interpolate it into a regular t-string
+    query = tsql.TSQL(t'SELECT *, ({subquery}) as post_user FROM users')
+    sql, params = query.render()
+
+    # The subquery SQL should be inlined, not parameterized
+    assert 'SELECT *,' in sql
+    assert 'SELECT posts.user_id FROM posts WHERE posts.id = ?' in sql
+    assert 'as post_user FROM users' in sql
+    # The parameter from the subquery should be in the params list
+    assert params == [42]
+
+
+def test_nested_querybuilder_with_multiple_params():
+    """Test nested QueryBuilder with multiple parameters from both queries"""
+    # Create a subquery with a parameter
+    subquery = Posts.select(Posts.id).where(Posts.user_id == 100)
+
+    # Use it in a main query that also has parameters
+    query = tsql.TSQL(t'SELECT * FROM users WHERE id = {5} AND post_count > ({subquery})')
+    sql, params = query.render()
+
+    # Both parameters should be in the list
+    assert params == [5, 100]
+    # The subquery should be inlined
+    assert 'SELECT posts.id FROM posts WHERE posts.user_id = ?' in sql
+
+
+def test_nested_querybuilder_with_different_styles():
+    """Test that nested QueryBuilders work with different parameter styles"""
+    from tsql.styles import NUMERIC_DOLLAR, NAMED
+
+    subquery = Posts.select(Posts.user_id).where(Posts.id == 42)
+
+    # Test with NUMERIC_DOLLAR style
+    query = tsql.TSQL(t'SELECT *, ({subquery}) as post_user FROM users WHERE id = {5}')
+    sql, params = query.render(style=NUMERIC_DOLLAR)
+    assert '$1' in sql and '$2' in sql
+    assert params == [42, 5]
+
+    # Test with NAMED style
+    sql, params = query.render(style=NAMED)
+    # Check that both parameters are present (names may vary)
+    assert isinstance(params, dict)
+    assert len(params) == 2
+    assert 42 in params.values() and 5 in params.values()
+    assert 'SELECT posts.user_id FROM posts WHERE posts.id = :' in sql

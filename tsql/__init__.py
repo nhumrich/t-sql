@@ -144,6 +144,9 @@ class TSQL:
                     return val.value._sql_parts
                 case "", Template():
                     return TSQL(value)._sql_parts
+                case '', x if hasattr(x, 'to_tsql'):
+                    logger.debug("Inlining QueryBuilder object: %s", type(x).__name__)
+                    return x.to_tsql()._sql_parts
                 case '', None:
                     return [Parameter(val.expression, None)]
                 # case 'as_array', list():

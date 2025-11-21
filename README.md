@@ -105,6 +105,22 @@ sql, params = tsql.render(t"UPDATE users SET {values:as_set} WHERE id='abc123'")
 # ('UPDATE users SET name = ?, email = ? WHERE id='abc123'', ['joe', 'joe@example.com'])
 ```
 
+#### Tuples for IN clauses
+
+Use tuples to expand lists of values for SQL IN clauses:
+
+```python
+# Convert list to tuple for IN clause
+my_ids = ['123', '234', '531']
+sql, params = tsql.render(t"SELECT * FROM mytable WHERE id IN {tuple(my_ids)}")
+# ('SELECT * FROM mytable WHERE id IN (?, ?, ?)', ['123', '234', '531'])
+
+# Or use a tuple directly
+active_statuses = ('active', 'pending', 'approved')
+sql, params = tsql.render(t"SELECT * FROM orders WHERE status IN {active_statuses}")
+# ('SELECT * FROM orders WHERE status IN (?, ?, ?)', ['active', 'pending', 'approved'])
+```
+
 ### Helper Functions
 
 t-sql provides several convenience functions for common SQL operations:

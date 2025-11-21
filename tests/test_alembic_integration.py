@@ -466,3 +466,144 @@ def test_alembic_detects_table_comment(temp_alembic_env):
 
     table = add_table_ops[0][1]
     assert table.comment == 'Application configuration'
+
+
+def test_alembic_detects_indexes(temp_alembic_env):
+    """Test that Alembic autogenerate detects indexes from indexes attribute"""
+    from sqlalchemy import Index
+
+    temp_dir, alembic_ini = temp_alembic_env
+    metadata = MetaData()
+    engine = create_engine("sqlite:///:memory:")
+
+    class Users(Table, table_name='users', metadata=metadata):
+        id = Column(String, primary_key=True)
+        email = Column(String, nullable=False)
+        username = Column(String)
+
+        indexes = [
+            Index('ix_users_email', 'email'),
+            Index('ix_users_username', 'username')
+        ]
+
+    cfg = Config(str(alembic_ini))
+    cfg.attributes['target_metadata'] = metadata
+    cfg.attributes['connection'] = engine
+
+    with engine.begin() as connection:
+        mc = MigrationContext.configure(connection)
+        diff = compare_metadata(mc, metadata)
+
+    # Should detect the new table
+    add_table_ops = [op for op in diff if op[0] == 'add_table']
+    assert len(add_table_ops) == 1
+
+    table = add_table_ops[0][1]
+    assert table.name == 'users'
+
+    # Alembic detects indexes as separate add_index operations
+    add_index_ops = [op for op in diff if op[0] == 'add_index']
+    assert len(add_index_ops) == 2
+
+    idx_names = {op[1].name for op in add_index_ops}
+    assert idx_names == {'ix_users_email', 'ix_users_username'}
+
+
+def test_alembic_detects_gin_indexes(temp_alembic_env):
+    """Test that Alembic autogenerate detects GIN indexes with PostgreSQL options"""
+    from sqlalchemy import Index
+
+    temp_dir, alembic_ini = temp_alembic_env
+    metadata = MetaData()
+    engine = create_engine("sqlite:///:memory:")
+
+    class Documents(Table, table_name='documents', metadata=metadata):
+        id = Column(String, primary_key=True)
+        title = Column(String)
+        content = Column(String)
+
+        indexes = [
+            Index('ix_documents_title_gin', 'title',
+                  postgresql_using='gin',
+                  postgresql_ops={'title': 'gin_trgm_ops'}),
+            Index('ix_documents_content_gin', 'content',
+                  postgresql_using='gin',
+                  postgresql_ops={'content': 'gin_trgm_ops'})
+        ]
+
+    cfg = Config(str(alembic_ini))
+    cfg.attributes['target_metadata'] = metadata
+    cfg.attributes['connection'] = engine
+
+    with engine.begin() as connection:
+        mc = MigrationContext.configure(connection)
+        diff = compare_metadata(mc, metadata)
+
+    add_table_ops = [op for op in diff if op[0] == 'add_table']
+    assert len(add_table_ops) == 1
+
+    # Alembic detects indexes as separate add_index operations
+    add_index_ops = [op for op in diff if op[0] == 'add_index']
+    assert len(add_index_ops) == 2
+
+    idx_names = {op[1].name for op in add_index_ops}
+    assert 'ix_documents_title_gin' in idx_names
+    assert 'ix_documents_content_gin' in idx_names
+
+    # Verify PostgreSQL-specific options are preserved
+    for op in add_index_ops:
+        idx = op[1]
+        if idx.name == 'ix_documents_title_gin':
+            assert idx.dialect_options['postgresql']['using'] == 'gin'
+            assert idx.dialect_options['postgresql']['ops'] == {'title': 'gin_trgm_ops'}
+        elif idx.name == 'ix_documents_content_gin':
+            assert idx.dialect_options['postgresql']['using'] == 'gin'
+            assert idx.dialect_options['postgresql']['ops'] == {'content': 'gin_trgm_ops'}
+
+
+def test_alembic_detects_indexes_and_constraints(temp_alembic_env):
+    """Test that Alembic autogenerate detects both indexes and constraints together"""
+    from sqlalchemy import Index, UniqueConstraint
+
+    temp_dir, alembic_ini = temp_alembic_env
+    metadata = MetaData()
+    engine = create_engine("sqlite:///:memory:")
+
+    class Products(Table, table_name='products', metadata=metadata):
+        id = Column(String, primary_key=True)
+        sku = Column(String, nullable=False)
+        name = Column(String)
+        category = Column(String)
+
+        constraints = [
+            UniqueConstraint('sku', name='uq_products_sku')
+        ]
+
+        indexes = [
+            Index('ix_products_category', 'category'),
+            Index('ix_products_name', 'name')
+        ]
+
+    cfg = Config(str(alembic_ini))
+    cfg.attributes['target_metadata'] = metadata
+    cfg.attributes['connection'] = engine
+
+    with engine.begin() as connection:
+        mc = MigrationContext.configure(connection)
+        diff = compare_metadata(mc, metadata)
+
+    add_table_ops = [op for op in diff if op[0] == 'add_table']
+    assert len(add_table_ops) == 1
+
+    table = add_table_ops[0][1]
+
+    # Verify constraint is in the table definition
+    unique_constraints = [c for c in table.constraints if isinstance(c, UniqueConstraint)]
+    assert len(unique_constraints) == 1
+    assert unique_constraints[0].name == 'uq_products_sku'
+
+    # Verify indexes are detected as separate operations
+    add_index_ops = [op for op in diff if op[0] == 'add_index']
+    assert len(add_index_ops) == 2
+    idx_names = {op[1].name for op in add_index_ops}
+    assert idx_names == {'ix_products_category', 'ix_products_name'}

@@ -420,3 +420,171 @@ def test_table_with_constraints_and_comment():
     sql, params = query.render()
     assert 'WHERE api_keys.user_id = ?' in sql
     assert params == ['user123']
+
+
+def test_table_with_single_index():
+    """Test that a single index is properly added to SA table"""
+    from sqlalchemy import Index
+
+    metadata = MetaData()
+
+    class Users(Table, table_name='users', metadata=metadata):
+        id = Column(String, primary_key=True)
+        email = Column(String, nullable=False)
+        created_at = Column(Integer)
+
+        indexes = [
+            Index('ix_users_email', 'email')
+        ]
+
+    sa_table = metadata.tables['users']
+
+    # Verify index is present
+    assert len(sa_table.indexes) == 1
+    idx = list(sa_table.indexes)[0]
+    assert idx.name == 'ix_users_email'
+    assert set(c.name for c in idx.columns) == {'email'}
+
+    # Query builder still works
+    query = Users.select(Users.email)
+    sql, params = query.render()
+    assert 'SELECT users.email FROM users' in sql
+
+
+def test_table_with_gin_index():
+    """Test that GIN index with PostgreSQL-specific options works"""
+    from sqlalchemy import Index
+
+    metadata = MetaData()
+
+    class Documents(Table, table_name='documents', metadata=metadata):
+        id = Column(String, primary_key=True)
+        title = Column(String)
+        content = Column(String)
+
+        indexes = [
+            Index('ix_documents_title_gin', 'title',
+                  postgresql_using='gin',
+                  postgresql_ops={'title': 'gin_trgm_ops'}),
+            Index('ix_documents_content_gin', 'content',
+                  postgresql_using='gin',
+                  postgresql_ops={'content': 'gin_trgm_ops'})
+        ]
+
+    sa_table = metadata.tables['documents']
+
+    # Verify both indexes are present
+    assert len(sa_table.indexes) == 2
+
+    idx_names = {idx.name for idx in sa_table.indexes}
+    assert 'ix_documents_title_gin' in idx_names
+    assert 'ix_documents_content_gin' in idx_names
+
+    # Verify PostgreSQL-specific options
+    for idx in sa_table.indexes:
+        if idx.name == 'ix_documents_title_gin':
+            assert idx.dialect_options['postgresql']['using'] == 'gin'
+            assert idx.dialect_options['postgresql']['ops'] == {'title': 'gin_trgm_ops'}
+        elif idx.name == 'ix_documents_content_gin':
+            assert idx.dialect_options['postgresql']['using'] == 'gin'
+            assert idx.dialect_options['postgresql']['ops'] == {'content': 'gin_trgm_ops'}
+
+
+def test_table_with_multiple_indexes():
+    """Test that multiple indexes can be added together"""
+    from sqlalchemy import Index
+
+    metadata = MetaData()
+
+    class Posts(Table, table_name='posts', metadata=metadata):
+        id = Column(String, primary_key=True)
+        author_id = Column(String, nullable=False)
+        status = Column(String)
+        published_at = Column(Integer)
+
+        indexes = [
+            Index('ix_posts_author', 'author_id'),
+            Index('ix_posts_status', 'status'),
+            Index('ix_posts_author_status', 'author_id', 'status')
+        ]
+
+    sa_table = metadata.tables['posts']
+
+    # Verify all indexes are present
+    assert len(sa_table.indexes) == 3
+
+    idx_names = {idx.name for idx in sa_table.indexes}
+    assert idx_names == {'ix_posts_author', 'ix_posts_status', 'ix_posts_author_status'}
+
+    # Verify multi-column index
+    multi_idx = [idx for idx in sa_table.indexes if idx.name == 'ix_posts_author_status'][0]
+    assert set(c.name for c in multi_idx.columns) == {'author_id', 'status'}
+
+
+def test_table_with_indexes_as_tuple():
+    """Test that indexes attribute works with tuple format"""
+    from sqlalchemy import Index
+
+    metadata = MetaData()
+
+    class Comments(Table, table_name='comments', metadata=metadata):
+        id = Column(Integer, primary_key=True)
+        post_id = Column(String)
+        user_id = Column(String)
+
+        indexes = (
+            Index('ix_comments_post', 'post_id'),
+            Index('ix_comments_user', 'user_id'),
+        )
+
+    sa_table = metadata.tables['comments']
+
+    # Verify indexes are present
+    assert len(sa_table.indexes) == 2
+    idx_names = {idx.name for idx in sa_table.indexes}
+    assert idx_names == {'ix_comments_post', 'ix_comments_user'}
+
+
+def test_table_with_indexes_and_constraints():
+    """Test that indexes and constraints work together"""
+    from sqlalchemy import Index, UniqueConstraint, CheckConstraint
+
+    metadata = MetaData()
+
+    class Products(Table, table_name='products', metadata=metadata):
+        id = Column(String, primary_key=True)
+        sku = Column(String, nullable=False)
+        name = Column(String)
+        price = Column(Integer)
+        category = Column(String)
+
+        constraints = [
+            UniqueConstraint('sku', name='uq_products_sku'),
+            CheckConstraint('price > 0', name='ck_products_positive_price')
+        ]
+
+        indexes = [
+            Index('ix_products_category', 'category'),
+            Index('ix_products_name_gin', 'name',
+                  postgresql_using='gin',
+                  postgresql_ops={'name': 'gin_trgm_ops'})
+        ]
+
+    sa_table = metadata.tables['products']
+
+    # Verify constraints
+    unique_constraints = [c for c in sa_table.constraints if isinstance(c, UniqueConstraint)]
+    check_constraints = [c for c in sa_table.constraints if isinstance(c, CheckConstraint)]
+    assert len(unique_constraints) == 1
+    assert len(check_constraints) == 1
+
+    # Verify indexes
+    assert len(sa_table.indexes) == 2
+    idx_names = {idx.name for idx in sa_table.indexes}
+    assert idx_names == {'ix_products_category', 'ix_products_name_gin'}
+
+    # Query builder still works
+    query = Products.select().where(Products.category == 'electronics')
+    sql, params = query.render()
+    assert 'WHERE products.category = ?' in sql
+    assert params == ['electronics']

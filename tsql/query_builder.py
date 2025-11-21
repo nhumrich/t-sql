@@ -410,12 +410,17 @@ class Table:
             if isinstance(table_constraints, tuple):
                 table_constraints = list(table_constraints)
 
+            # Extract indexes from class attribute (supports both tuple and list)
+            table_indexes = getattr(cls, 'indexes', [])
+            if isinstance(table_indexes, tuple):
+                table_indexes = list(table_indexes)
+
             # Build keyword args for SATable
             table_kwargs = {'schema': schema}
             if comment is not None:
                 table_kwargs['comment'] = comment
 
-            cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, *table_constraints, **table_kwargs)
+            cls._sa_table = SATable(cls.table_name, metadata, *sa_columns, *table_constraints, *table_indexes, **table_kwargs)
 
         # Add the ALL column for wildcard column selection
         cls.ALL = Column(cls.table_name, '*', schema=schema)

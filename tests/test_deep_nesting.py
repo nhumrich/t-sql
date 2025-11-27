@@ -311,7 +311,8 @@ def test_case_expression_with_subqueries():
 
     sql, params = tsql.render(query, style=styles.QMARK)
 
-    assert "CASE WHEN (SELECT COUNT(*)" in sql
+    assert "CASE" in sql
+    assert "WHEN (SELECT COUNT(*)" in sql
     assert "> ?" in sql
     assert "THEN 'active'" in sql
     assert params == [10]

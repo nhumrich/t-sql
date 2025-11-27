@@ -35,15 +35,26 @@ def test_merges_literals_using_exsiting_tstring():
     assert result._sql == 'hello there'
 
 
-def test_strips_literal_whitespace():
-    result = tsql.render(t"SELECT             \n * \n FROM               table")
+def test_strips_horizontal_whitespace():
+    # Horizontal whitespace (spaces/tabs) is collapsed, but newlines are preserved
+    result = tsql.render(t"SELECT		    *    FROM               table")
     assert result[0] == 'SELECT * FROM table'
+
+
+def test_preserves_newlines_for_sql_comments():
+    # Newlines must be preserved so -- style SQL comments work correctly
+    query = t"""SELECT * FROM users
+-- Filter by active status
+WHERE active = true"""
+    result = tsql.render(query)
+    assert '-- Filter by active status\n' in result[0]
+    assert 'WHERE active = true' in result[0]
 
 
 def test_doesnt_strip_whitespace_in_values():
     user_input = 'Some string\nWith whitespace.    With Formating    that is   \n  just right'
-    result = tsql.render(t'INSERT \n INTO table (vals) VALUES({user_input})')
-    assert result[0] == f'INSERT INTO table (vals) VALUES(?)'
+    result = tsql.render(t'INSERT INTO table (vals) VALUES({user_input})')
+    assert result[0] == 'INSERT INTO table (vals) VALUES(?)'
     assert result[1] == [user_input]
 
 

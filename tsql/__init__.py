@@ -9,8 +9,9 @@ from tsql.styles import ParamStyle, QMARK
 
 logger = logging.getLogger(__name__)
 
-# Pre-compile regex for whitespace collapsing to avoid cache lookup overhead
-_WHITESPACE_RE = re.compile(r'\s+')
+# Pre-compile regex for horizontal whitespace collapsing (spaces/tabs only)
+# Preserves newlines so that -- style SQL comments work correctly
+_WHITESPACE_RE = re.compile(r'[ \t]+')
 
 if TYPE_CHECKING:
     from tsql.query_builder import QueryBuilder

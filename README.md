@@ -105,6 +105,45 @@ sql, params = tsql.render(t"UPDATE users SET {values:as_set} WHERE id='abc123'")
 # ('UPDATE users SET name = ?, email = ? WHERE id='abc123'', ['joe', 'joe@example.com'])
 ```
 
+#### LIKE Pattern Matching
+
+**Safe pattern matching with automatic wildcard escaping**:
+
+```python
+# Contains search (%value%)
+search = "john"
+sql, params = tsql.render(t"SELECT * FROM users WHERE name ILIKE {search:%like%}")
+# ('SELECT * FROM users WHERE name ILIKE ? ESCAPE '\\'', ['%john%'])
+
+# Prefix search (value% - starts with)
+prefix = "admin"
+sql, params = tsql.render(t"SELECT * FROM users WHERE username LIKE {prefix:like%}")
+# ('SELECT * FROM users WHERE username LIKE ? ESCAPE '\\'', ['admin%'])
+
+# Suffix search (%value - ends with)
+domain = "@gmail.com"
+sql, params = tsql.render(t"SELECT * FROM users WHERE email LIKE {domain:%like}")
+# ('SELECT * FROM users WHERE email LIKE ? ESCAPE '\\'', ['%@gmail.com'])
+```
+
+**Security**: All LIKE format specs automatically escape `%`, `_`, and `\` wildcards in user input to prevent injection attacks:
+
+# Wildcards in data are escaped
+search = "50%_discount"
+sql, params = tsql.render(t"SELECT * FROM products WHERE name LIKE {search:%like%}")
+# ('SELECT * FROM products WHERE name LIKE ? ESCAPE '\\'', ['%50\\%\\_discount%'])
+# Matches the literal string "50%_discount", not "50X" or "50Xdiscount"
+```
+
+**For controlled values where you WANT wildcards**, build the pattern manually without format specs:
+
+```python
+# Developer-controlled pattern (wildcards intentional)
+pattern = f"%{category}%"
+sql, params = tsql.render(t"SELECT * FROM products WHERE tags LIKE {pattern}")
+# No escaping - % and _ work as wildcards
+```
+
 #### Tuples for IN clauses
 
 Use tuples to expand lists of values for SQL IN clauses:

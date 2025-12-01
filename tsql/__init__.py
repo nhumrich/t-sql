@@ -24,6 +24,11 @@ def set_style(style: type[ParamStyle]):
     default_style = style
 
 
+def _escape_like(value: str) -> str:
+    # Order matters: escape backslash first to avoid double-escaping
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
 class Parameter:
     _expression: str
     _value: Any
@@ -141,6 +146,28 @@ class TSQL:
                     return as_values(value)._sql_parts
                 case 'as_set', dict():
                     return as_set(value)._sql_parts
+                case fmt_spec, _ if fmt_spec in ('%like%', 'like%', '%like'):  # LIKE patterns
+                    if value is None:
+                        raise ValueError(
+                            f"LIKE pattern value cannot be None for {{value:{fmt_spec}}}. "
+                            f"Use a non-None value or handle None before the query."
+                        )
+                    str_value = str(value)
+                    escaped = _escape_like(str_value)
+
+                    # Apply pattern based on format spec
+                    if fmt_spec == '%like%':
+                        wrapped = f"%{escaped}%"
+                        pattern_type = "contains"
+                    elif fmt_spec == 'like%':
+                        wrapped = f"{escaped}%"
+                        pattern_type = "prefix"
+                    else:  # '%like'
+                        wrapped = f"%{escaped}"
+                        pattern_type = "suffix"
+
+                    logger.debug("LIKE %s pattern: %r -> %r (escaped: %r)", pattern_type, value, wrapped, escaped)
+                    return [Parameter(val.expression, wrapped), " ESCAPE '\\'"]
                 case '', TSQL():
                     return val.value._sql_parts
                 case "", Template():

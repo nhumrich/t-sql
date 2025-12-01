@@ -269,3 +269,104 @@ async def test_datetime_comparison_with_asyncpg(conn):
     assert len(rows) == 2
     names = sorted([row['name'] for row in rows])
     assert names == ['User2', 'User3']
+
+
+async def test_like_pattern_format_specs_with_postgres(conn):
+    """Test LIKE pattern format specs with PostgreSQL"""
+    # Insert test data with special characters
+    await conn.execute(
+        "INSERT INTO test_users (name) VALUES ($1), ($2), ($3), ($4)",
+        'john_doe', 'john%smith', 'alice', 'admin_50%'
+    )
+
+    # Test contains pattern (%like%)
+    search = "john"
+    sql, params = tsql.render(
+        t"SELECT name FROM test_users WHERE name LIKE {search:%like%} ORDER BY name",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    assert "ESCAPE '\\'" in sql
+    assert params == ['%john%']
+
+    rows = await conn.fetch(sql, *params)
+
+    # Should match both john_doe and john%smith
+    assert len(rows) == 2
+    names = sorted([row['name'] for row in rows])
+    assert names == ['john%smith', 'john_doe']
+
+    # Test prefix pattern (like%)
+    prefix = "admin"
+    sql, params = tsql.render(
+        t"SELECT name FROM test_users WHERE name LIKE {prefix:like%}",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    assert params == ['admin%']
+
+    rows = await conn.fetch(sql, *params)
+
+    # Should match admin_50%
+    assert len(rows) == 1
+    assert rows[0]['name'] == 'admin_50%'
+
+    # Test wildcard escaping - searching for literal underscore
+    search = "john_"
+    sql, params = tsql.render(
+        t"SELECT name FROM test_users WHERE name LIKE {search:%like%}",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    # Should escape the underscore
+    assert params == ['%john\\_%']
+
+    rows = await conn.fetch(sql, *params)
+
+    # Should match only john_doe (literal underscore after "john")
+    assert len(rows) == 1
+    assert rows[0]['name'] == 'john_doe'
+
+    # Test wildcard escaping - searching for literal percent
+    search = "50%"
+    sql, params = tsql.render(
+        t"SELECT name FROM test_users WHERE name LIKE {search:%like%}",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    # Should escape the percent
+    assert params == ['%50\\%%']
+
+    rows = await conn.fetch(sql, *params)
+
+    # Should match admin_50%
+    assert len(rows) == 1
+    assert rows[0]['name'] == 'admin_50%'
+
+    # Test suffix pattern (%like)
+    suffix = "_doe"
+    sql, params = tsql.render(
+        t"SELECT name FROM test_users WHERE name LIKE {suffix:%like}",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    # Underscore should be escaped
+    assert params == ['%\\_doe']
+
+    rows = await conn.fetch(sql, *params)
+
+    # Should match john_doe
+    assert len(rows) == 1
+    assert rows[0]['name'] == 'john_doe'
+
+    # Test ILIKE (case-insensitive) works too
+    search = "JOHN"
+    sql, params = tsql.render(
+        t"SELECT name FROM test_users WHERE name ILIKE {search:%like%}",
+        style=tsql.styles.NUMERIC_DOLLAR
+    )
+
+    rows = await conn.fetch(sql, *params)
+
+    # Should match both john_doe and john%smith (case-insensitive)
+    assert len(rows) == 2

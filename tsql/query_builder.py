@@ -1161,6 +1161,7 @@ class SelectQueryBuilder(QueryBuilder):
         self._order_by_columns: List[tuple[Union[Column, str], str]] = []
         self._limit_value: Optional[int] = None
         self._offset_value: Optional[int] = None
+        self._ctes: List[tuple[str, Union[Template, TSQL, 'SelectQueryBuilder'], bool]] = []
 
     @classmethod
     def from_table(cls, table_name: str, schema: Optional[str] = None) -> 'SelectQueryBuilder':
@@ -1283,9 +1284,84 @@ class SelectQueryBuilder(QueryBuilder):
         self._offset_value = n
         return self
 
+    def with_cte(self, name: str,
+                 query: Union[Template, TSQL, 'SelectQueryBuilder'],
+                 recursive: bool = False) -> 'SelectQueryBuilder':
+        """Add a CTE to this query's WITH clause.
+
+        Multiple CTEs can be chained by calling this method multiple times.
+
+        Args:
+            name: CTE name (validated as valid identifier)
+            query: The CTE query (SelectQueryBuilder, t-string Template, or TSQL)
+            recursive: Whether this CTE is recursive (adds RECURSIVE keyword)
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            # Basic CTE
+            query = (
+                SelectQueryBuilder.from_table('active_users')
+                .with_cte('active_users', Users.select().where(Users.active == True))
+                .select('id', 'name')
+            )
+
+            # Multiple CTEs
+            query = (
+                SelectQueryBuilder.from_table('filtered')
+                .with_cte('jennifers', Users.select().where(...))
+                .with_cte('filtered', t'SELECT id FROM jennifers WHERE age > 18')
+                .select('*')
+            )
+
+            # Recursive CTE
+            query = (
+                SelectQueryBuilder.from_table('tree')
+                .with_cte('tree', t'''
+                    SELECT id, name, parent_id FROM categories WHERE parent_id IS NULL
+                    UNION ALL
+                    SELECT c.id, c.name, c.parent_id FROM categories c
+                    JOIN tree t ON c.parent_id = t.id
+                ''', recursive=True)
+                .select('*')
+            )
+        """
+        if not name.isidentifier():
+            raise ValueError(f"Invalid CTE name: {name!r}. Must be a valid Python identifier.")
+
+        self._ctes.append((name, query, recursive))
+        return self
+
     def to_tsql(self) -> TSQL:
         """Build the final TSQL object"""
         parts: List[Template] = []
+
+        # Render CTEs if present
+        if self._ctes:
+            has_recursive = any(recursive for _, _, recursive in self._ctes)
+            cte_parts = []
+
+            for name, query, _ in self._ctes:
+                # Convert CTE query to TSQL
+                if hasattr(query, 'to_tsql'):
+                    cte_sql = query.to_tsql()
+                elif isinstance(query, Template):
+                    cte_sql = TSQL(query)
+                else:
+                    cte_sql = query
+
+                # Render as: cte_name AS (query)
+                cte_parts.append(t'{name:literal} AS ({cte_sql})')
+
+            # Join all CTEs with commas
+            cte_clause = t_join(t', ', cte_parts)
+
+            # Add WITH or WITH RECURSIVE
+            if has_recursive:
+                parts.append(t'WITH RECURSIVE {cte_clause}')
+            else:
+                parts.append(t'WITH {cte_clause}')
 
         if self._columns:
             # Build column list, handling Column objects, Template (t-string) objects, and strings

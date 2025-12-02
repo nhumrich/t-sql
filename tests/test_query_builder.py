@@ -1431,3 +1431,104 @@ def test_nested_querybuilder_with_different_styles():
     assert len(params) == 2
     assert 42 in params.values() and 5 in params.values()
     assert 'SELECT posts.user_id FROM posts WHERE posts.id = :' in sql
+
+
+# CTE Tests
+
+def test_basic_cte():
+    """Test basic CTE with query builder"""
+    from tsql.query_builder import SelectQueryBuilder
+
+    query = (
+        SelectQueryBuilder.from_table('active_users')
+        .with_cte('active_users', Users.select(Users.id, Users.username).where(Users.email == 'test@example.com'))
+        .select('id', 'username')
+    )
+
+    sql, params = query.render()
+    assert sql == "WITH active_users AS (SELECT users.id, users.username FROM users WHERE users.email = ?) SELECT id, username FROM active_users"
+    assert params == ['test@example.com']
+
+
+def test_cte_with_tstring():
+    """Test CTE with raw t-string query"""
+    from tsql.query_builder import SelectQueryBuilder
+
+    query = (
+        SelectQueryBuilder.from_table('counts')
+        .with_cte('counts', t'SELECT COUNT(*) as total FROM users')
+        .select('total')
+    )
+
+    sql, _ = query.render()
+    assert "WITH counts AS (SELECT COUNT(*) as total FROM users)" in sql
+    assert "SELECT total FROM counts" in sql
+
+
+def test_multiple_ctes():
+    """Test chaining multiple CTEs"""
+    from tsql.query_builder import SelectQueryBuilder
+
+    query = (
+        SelectQueryBuilder.from_table('filtered')
+        .with_cte('jennifers', Users.select(Users.id, Users.username).where(Users.username == 'Jennifer'))
+        .with_cte('filtered', t'SELECT id FROM jennifers WHERE id > 18')
+    )
+
+    sql, _ = query.render()
+    assert "WITH jennifers AS" in sql
+    assert ", filtered AS" in sql
+    assert "SELECT * FROM filtered" in sql
+
+
+def test_recursive_cte():
+    """Test recursive CTE with t-string"""
+    from tsql.query_builder import SelectQueryBuilder
+
+    query = (
+        SelectQueryBuilder.from_table('category_tree')
+        .with_cte('category_tree', t'''
+            SELECT id, name, parent_id, 1 as level
+            FROM categories
+            WHERE parent_id IS NULL
+            UNION ALL
+            SELECT c.id, c.name, c.parent_id, ct.level + 1
+            FROM categories c
+            JOIN category_tree ct ON c.parent_id = ct.id
+        ''', recursive=True)
+    )
+
+    sql, _ = query.render()
+    assert sql.startswith("WITH RECURSIVE category_tree AS")
+    assert "SELECT * FROM category_tree" in sql
+
+
+def test_cte_name_validation():
+    """Test CTE name is validated as identifier"""
+    from tsql.query_builder import SelectQueryBuilder
+    import pytest
+
+    query = SelectQueryBuilder.from_table('test')
+
+    with pytest.raises(ValueError, match="Invalid CTE name"):
+        query.with_cte('invalid-name', t'SELECT 1')
+
+    with pytest.raises(ValueError, match="Invalid CTE name"):
+        query.with_cte('123start', t'SELECT 1')
+
+
+def test_multiple_recursive_ctes():
+    """Test multiple CTEs where one is recursive"""
+    from tsql.query_builder import SelectQueryBuilder
+
+    query = (
+        SelectQueryBuilder.from_table('result')
+        .with_cte('normal', t'SELECT id FROM users')
+        .with_cte('tree', t'SELECT id FROM tree UNION ALL SELECT id+1 FROM tree WHERE id < 10', recursive=True)
+    )
+
+    sql, _ = query.render()
+    # Should use WITH RECURSIVE if ANY CTE is recursive
+    assert sql.startswith("WITH RECURSIVE")
+    assert "normal AS" in sql
+    assert "tree AS" in sql

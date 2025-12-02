@@ -116,6 +116,19 @@ def test_select_specific_columns():
     assert params == []
 
 
+def test_multiple_select_calls_append():
+    """Test that multiple .select() calls append columns instead of replacing them"""
+    query = Users.select(Users.id)
+    query.select(Users.username, Users.email)
+    sql, params = query.render()
+
+    # All three columns should be present
+    assert 'users.id' in sql
+    assert 'users.username' in sql
+    assert 'users.email' in sql
+    assert params == []
+
+
 def test_select_with_where():
     """Test SELECT with WHERE clause"""
     query = Users.select(Users.id, Users.username).where(Users.id == 5)

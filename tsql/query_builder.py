@@ -1201,7 +1201,13 @@ class SelectQueryBuilder(QueryBuilder):
             # No columns specified selects all (SELECT *)
             users.select()
         """
-        self._columns = list(columns) if columns else None
+        if columns:
+            if self._columns is None:
+                self._columns = []
+            self._columns.extend(columns)
+        else:
+            # Calling select() with no args resets to SELECT *
+            self._columns = None
         return self
 
     def where(self, condition: Union[Condition, Template]) -> 'SelectQueryBuilder':

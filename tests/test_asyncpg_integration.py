@@ -370,3 +370,91 @@ async def test_like_pattern_format_specs_with_postgres(conn):
 
     # Should match both john_doe and john%smith (case-insensitive)
     assert len(rows) == 2
+
+
+async def test_jsonb_with_dict(conn):
+    """Test that dict objects can be used with asyncpg JSONB columns via set_type_codec"""
+    import json
+
+    # Create a table with JSONB column
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS test_jsonb (
+            id SERIAL PRIMARY KEY,
+            data JSONB
+        )
+    """)
+
+    try:
+        # Set up a codec so asyncpg can handle Python dicts for JSONB
+        # This is the recommended asyncpg pattern for JSONB
+        await conn.set_type_codec(
+            'jsonb',
+            encoder=json.dumps,
+            decoder=json.loads,
+            schema='pg_catalog'
+        )
+
+        # Now dicts work directly because tsql preserves them (not stringified)
+        my_dict = {'name': 'billy', 'age': 30, 'tags': ['admin', 'user']}
+
+        query, params = tsql.render(
+            t"INSERT INTO test_jsonb (data) VALUES ({my_dict})",
+            style=tsql.styles.NUMERIC_DOLLAR
+        )
+
+        # Verify the parameter is still a dict (not stringified)
+        assert len(params) == 1
+        assert isinstance(params[0], dict)
+
+        # This should work now with the type codec
+        await conn.execute(query, *params)
+
+        # Verify data was inserted correctly and can be queried
+        row = await conn.fetchrow("SELECT data FROM test_jsonb WHERE id = 1")
+        assert row['data'] == my_dict
+        assert row['data']['name'] == 'billy'
+        assert row['data']['tags'] == ['admin', 'user']
+
+        # Test querying with JSONB operators
+        name = 'billy'
+        query2, params2 = tsql.render(
+            t"SELECT data FROM test_jsonb WHERE data->>'name' = {name}",
+            style=tsql.styles.NUMERIC_DOLLAR
+        )
+        rows = await conn.fetch(query2, *params2)
+        assert len(rows) == 1
+    finally:
+        await conn.execute("DROP TABLE IF EXISTS test_jsonb")
+
+
+async def test_array_with_list(conn):
+    """Test that list objects work correctly with asyncpg array columns"""
+    # Create a table with array column
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS test_array (
+            id SERIAL PRIMARY KEY,
+            tags TEXT[]
+        )
+    """)
+
+    try:
+        # Insert a list - this should work because list is preserved
+        my_list = ['tag1', 'tag2', 'tag3']
+
+        query, params = tsql.render(
+            t"INSERT INTO test_array (tags) VALUES ({my_list})",
+            style=tsql.styles.NUMERIC_DOLLAR
+        )
+
+        # Verify the parameter is still a list (not stringified)
+        assert len(params) == 1
+        assert isinstance(params[0], list)
+
+        # This should work without asyncpg throwing an error
+        await conn.execute(query, *params)
+
+        # Verify data was inserted correctly
+        row = await conn.fetchrow("SELECT tags FROM test_array WHERE id = 1")
+        assert row['tags'] == my_list
+    finally:
+        await conn.execute("DROP TABLE IF EXISTS test_array")

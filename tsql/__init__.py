@@ -195,6 +195,8 @@ class TSQL:
                     return [Parameter(val.expression, val.value)]
                 case '', datetime.datetime() | datetime.date() | datetime.time() | datetime.timedelta():
                     return [Parameter(val.expression, value)]
+                case '', dict() | list() | set():
+                    return [Parameter(val.expression, value)]
                 case _, _:
                     return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
 

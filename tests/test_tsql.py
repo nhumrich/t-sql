@@ -168,4 +168,54 @@ def test_datetime_with_format_spec_converts_to_string():
     assert isinstance(result[1][0], str)
 
 
+def test_dict_preserved_as_native_type():
+    """Dict values should pass through as dict objects, not strings."""
+    my_dict = {'name': 'billy', 'age': 30}
+    result = tsql.render(t'INSERT INTO users (data) VALUES ({my_dict})')
+    assert result.sql == 'INSERT INTO users (data) VALUES (?)'
+    assert result.values == [{'name': 'billy', 'age': 30}]
+    assert isinstance(result.values[0], dict)
+
+
+def test_list_preserved_as_native_type():
+    """List values should pass through as list objects, not strings."""
+    my_list = [1, 2, 3, 'four']
+    result = tsql.render(t'INSERT INTO items (tags) VALUES ({my_list})')
+    assert result.sql == 'INSERT INTO items (tags) VALUES (?)'
+    assert result.values == [[1, 2, 3, 'four']]
+    assert isinstance(result.values[0], list)
+
+
+def test_set_preserved_as_native_type():
+    """Set values should pass through as set objects, not strings."""
+    my_set = {1, 2, 3}
+    result = tsql.render(t'INSERT INTO items (ids) VALUES ({my_set})')
+    assert result.sql == 'INSERT INTO items (ids) VALUES (?)'
+    assert isinstance(result.values[0], set)
+    assert result.values[0] == {1, 2, 3}
+
+
+def test_nested_dict_with_list():
+    """Nested structures should preserve their types."""
+    data = {'tags': ['a', 'b'], 'count': 5}
+    result = tsql.render(t'UPDATE users SET meta = {data}')
+    assert isinstance(result.values[0], dict)
+    assert isinstance(result.values[0]['tags'], list)
+
+
+def test_empty_collections_preserved():
+    """Empty collections should also preserve their types."""
+    empty_dict = {}
+    empty_list = []
+    empty_set = set()
+
+    r1 = tsql.render(t'VALUES ({empty_dict})')
+    r2 = tsql.render(t'VALUES ({empty_list})')
+    r3 = tsql.render(t'VALUES ({empty_set})')
+
+    assert isinstance(r1.values[0], dict)
+    assert isinstance(r2.values[0], list)
+    assert isinstance(r3.values[0], set)
+
+
 

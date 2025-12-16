@@ -193,11 +193,11 @@ class TSQL:
                     return [Parameter(val.expression, value)]
                 case _, int():
                     return [Parameter(val.expression, val.value)]
-                case '', datetime.datetime() | datetime.date() | datetime.time() | datetime.timedelta():
-                    return [Parameter(val.expression, value)]
-                case '', dict() | list() | set():
+                case '', _:
+                    # No format spec - pass through value as-is for database driver to handle
                     return [Parameter(val.expression, value)]
                 case _, _:
+                    # Has format spec - apply formatting (e.g., {dt:%Y-%m-%d})
                     return [Parameter(val.expression, formatter.format_field(value, val.format_spec))]
 
         if isinstance(val, Template):

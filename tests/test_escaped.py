@@ -123,8 +123,8 @@ def test_escaped_handles_float_values():
     """Test proper escaping of float values"""
     price = 19.99
     result = tsql.render(t"SELECT * FROM products WHERE price = {price}", style=tsql.styles.ESCAPED)
-    # Note: floats get converted to strings by the formatter before reaching ESCAPED style
-    assert result[0] == "SELECT * FROM products WHERE price = '19.99'"
+    # Floats are passed through and rendered as numeric (no quotes) - correct SQL behavior
+    assert result[0] == "SELECT * FROM products WHERE price = 19.99"
     assert result[1] == []
 
 

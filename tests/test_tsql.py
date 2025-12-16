@@ -218,4 +218,34 @@ def test_empty_collections_preserved():
     assert isinstance(r3.values[0], set)
 
 
+def test_custom_object_preserved():
+    """Custom objects should pass through for database drivers with custom codecs."""
+    class Point:
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
+
+    p = Point(3, 4)
+    result = tsql.render(t'INSERT INTO coords (loc) VALUES ({p})')
+    assert result.sql == 'INSERT INTO coords (loc) VALUES (?)'
+    assert isinstance(result.values[0], Point)
+    assert result.values[0].x == 3
+    assert result.values[0].y == 4
+
+
+def test_custom_object_with_format_spec_stringifies():
+    """Custom objects WITH a format spec should be formatted (stringified)."""
+    class Point:
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
+        def __format__(self, spec):
+            return f"POINT({self.x},{self.y})"
+
+    p = Point(3, 4)
+    result = tsql.render(t'INSERT INTO coords (loc) VALUES ({p:s})')
+    assert result.values[0] == "POINT(3,4)"
+    assert isinstance(result.values[0], str)
+
+
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "t-sql"
-version = "4.9.2"
+version = "4.9.3"
 description = "Safe SQL. SQL queries for python t-strings (PEP 750)"
 readme = "README.md"
 requires-python = ">=3.14"

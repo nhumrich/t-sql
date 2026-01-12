@@ -1545,3 +1545,45 @@ def test_multiple_recursive_ctes():
     assert sql.startswith("WITH RECURSIVE")
     assert "normal AS" in sql
     assert "tree AS" in sql
+
+
+def test_where_with_bare_boolean_column():
+    """Test WHERE with bare boolean column (truthy check)"""
+    class Contacts(Table):
+        id: Column
+        is_primary: Column
+
+    query = Contacts.select().where(Contacts.is_primary)
+    sql, params = query.render()
+
+    assert 'WHERE contacts.is_primary' in sql
+    assert params == []
+
+
+def test_update_where_with_bare_boolean_column():
+    """Test UPDATE WHERE with bare boolean column"""
+    class Contacts(Table):
+        id: Column
+        is_primary: Column
+        name: Column
+
+    query = Contacts.update(name='updated').where(Contacts.is_primary)
+    sql, params = query.render()
+
+    assert 'UPDATE contacts SET' in sql
+    assert 'WHERE contacts.is_primary' in sql
+    assert params == ['updated']
+
+
+def test_delete_where_with_bare_boolean_column():
+    """Test DELETE WHERE with bare boolean column"""
+    class Contacts(Table):
+        id: Column
+        is_primary: Column
+
+    query = Contacts.delete().where(Contacts.is_primary)
+    sql, params = query.render()
+
+    assert 'DELETE FROM contacts' in sql
+    assert 'WHERE contacts.is_primary' in sql
+    assert params == []

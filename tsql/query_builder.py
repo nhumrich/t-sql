@@ -932,7 +932,7 @@ class UpdateBuilder(QueryBuilder):
         string_table = _StringTable(table_name, schema)
         return cls(string_table, values)
 
-    def where(self, condition: Union[Condition, Template]) -> 'UpdateBuilder':
+    def where(self, condition: Union[Condition, Template, Column]) -> 'UpdateBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
         self._conditions.append(condition)
         self._requires_where = False
@@ -994,6 +994,9 @@ class UpdateBuilder(QueryBuilder):
             for cond in self._conditions:
                 if isinstance(cond, Template):
                     where_parts.append(t'({cond})')
+                elif isinstance(cond, Column):
+                    col_str = str(cond)
+                    where_parts.append(t'{col_str:literal}')
                 else:
                     where_parts.append(cond.to_tsql())
             combined_where = t_join(t' AND ', where_parts)
@@ -1057,7 +1060,7 @@ class DeleteBuilder(QueryBuilder):
         string_table = _StringTable(table_name, schema)
         return cls(string_table)
 
-    def where(self, condition: Union[Condition, Template]) -> 'DeleteBuilder':
+    def where(self, condition: Union[Condition, Template, Column]) -> 'DeleteBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)"""
         self._conditions.append(condition)
         self._requires_where = False
@@ -1112,6 +1115,9 @@ class DeleteBuilder(QueryBuilder):
             for cond in self._conditions:
                 if isinstance(cond, Template):
                     where_parts.append(t'({cond})')
+                elif isinstance(cond, Column):
+                    col_str = str(cond)
+                    where_parts.append(t'{col_str:literal}')
                 else:
                     where_parts.append(cond.to_tsql())
             combined_where = t_join(t' AND ', where_parts)
@@ -1210,7 +1216,7 @@ class SelectQueryBuilder(QueryBuilder):
             self._columns = None
         return self
 
-    def where(self, condition: Union[Condition, Template]) -> 'SelectQueryBuilder':
+    def where(self, condition: Union[Condition, Template, Column]) -> 'SelectQueryBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)
 
         Accepts either Condition objects from query builder or raw t-string Templates
@@ -1401,6 +1407,9 @@ class SelectQueryBuilder(QueryBuilder):
             for cond in self._conditions:
                 if isinstance(cond, Template):
                     where_parts.append(t'({cond})')
+                elif isinstance(cond, Column):
+                    col_str = str(cond)
+                    where_parts.append(t'{col_str:literal}')
                 else:
                     where_parts.append(cond.to_tsql())
             combined_where = t_join(t' AND ', where_parts)

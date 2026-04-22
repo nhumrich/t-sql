@@ -375,6 +375,14 @@ query = Users.insert(id='abc123', username='john', email='john@example.com').ret
 sql, params = query.render()
 # ('INSERT INTO users (id, username, email) VALUES (?, ?, ?) RETURNING *', [...])
 
+# INSERT with all column defaults — no values provided (Postgres/SQLite)
+# Emits `DEFAULT VALUES`; useful when every column has a DB/SA default.
+# Note: MySQL does not support `DEFAULT VALUES` syntax. For MySQL, provide at
+# least one column or use raw SQL (`INSERT INTO t () VALUES ()`).
+query = Users.insert().returning('id')
+sql, params = query.render()
+# ('INSERT INTO users DEFAULT VALUES RETURNING id', [])
+
 # INSERT IGNORE (MySQL)
 query = Users.insert(id='abc123', username='john', email='john@example.com').ignore()
 sql, params = query.render()

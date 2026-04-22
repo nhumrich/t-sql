@@ -759,8 +759,9 @@ class InsertBuilder(QueryBuilder):
             processor = self.base_table._type_processors.get(col_name)
             values_dict[col_name] = _process_value_for_builder(value, processor)
 
-        # MySQL INSERT IGNORE
-        if self._ignore:
+        if not values_dict:
+            parts.append(t'INSERT INTO {table_name:literal} DEFAULT VALUES')
+        elif self._ignore:
             parts.append(t'INSERT IGNORE INTO {table_name:literal} {values_dict:as_values}')
         else:
             parts.append(t'INSERT INTO {table_name:literal} {values_dict:as_values}')
@@ -821,6 +822,10 @@ class InsertBuilder(QueryBuilder):
                     update_dict[col_name] = _process_value_for_builder(value, processor)
                 parts.append(t'ON DUPLICATE KEY UPDATE {update_dict:as_set}')
             else:
+                if not self.values:
+                    raise ValueError(
+                        "ON DUPLICATE KEY UPDATE requires explicit columns when inserting DEFAULT VALUES"
+                    )
                 # Default: update all columns with alias.column (new MySQL syntax)
                 update_parts = []
                 for i, key in enumerate(self.values.keys()):

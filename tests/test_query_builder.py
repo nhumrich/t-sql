@@ -1208,6 +1208,43 @@ def test_insert_without_metadata_ignores_defaults():
     assert params == ['1', 'test']
 
 
+class _DefaultsTable(Table, table_name='mytable'):
+    id: Column
+    name: Column
+
+
+def test_insert_all_defaults():
+    sql, params = _DefaultsTable.insert().render()
+    assert sql == 'INSERT INTO mytable DEFAULT VALUES'
+    assert params == []
+
+
+def test_insert_all_defaults_with_returning():
+    sql, params = _DefaultsTable.insert().returning('id').render()
+    assert sql == 'INSERT INTO mytable DEFAULT VALUES RETURNING id'
+    assert params == []
+
+
+def test_insert_all_defaults_with_returning_star():
+    sql, params = _DefaultsTable.insert().returning().render()
+    assert sql == 'INSERT INTO mytable DEFAULT VALUES RETURNING *'
+    assert params == []
+
+
+def test_insert_all_defaults_with_on_conflict_do_nothing():
+    sql, params = _DefaultsTable.insert().on_conflict_do_nothing().render()
+    assert sql == 'INSERT INTO mytable DEFAULT VALUES ON CONFLICT DO NOTHING'
+    assert params == []
+
+
+def test_insert_all_defaults_mysql_on_duplicate_raises():
+    import pytest
+
+    builder = _DefaultsTable.insert().on_duplicate_key_update()
+    with pytest.raises(ValueError, match='DEFAULT VALUES'):
+        builder.render()
+
+
 def test_update_with_onupdate_default():
     """Test that onupdate defaults are applied during UPDATE"""
     from sqlalchemy import MetaData, Column as SAColumn, String

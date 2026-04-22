@@ -458,3 +458,34 @@ async def test_array_with_list(conn):
         assert row['tags'] == my_list
     finally:
         await conn.execute("DROP TABLE IF EXISTS test_array")
+
+
+async def test_insert_all_defaults_with_returning(conn):
+    """Insert with empty values uses DEFAULT VALUES; all columns have defaults."""
+    from tsql.query_builder import Table, Column
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS test_defaults (
+            id SERIAL PRIMARY KEY,
+            status VARCHAR(20) DEFAULT 'draft',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    try:
+        class TestDefaults(Table, table_name='test_defaults'):
+            id: Column
+            status: Column
+            created_at: Column
+
+        query, params = TestDefaults.insert().returning('id', 'status').render(
+            style=tsql.styles.NUMERIC_DOLLAR
+        )
+        assert query == 'INSERT INTO test_defaults DEFAULT VALUES RETURNING id, status'
+        assert params == []
+
+        row = await conn.fetchrow(query, *params)
+        assert row['id'] is not None
+        assert row['status'] == 'draft'
+    finally:
+        await conn.execute("DROP TABLE IF EXISTS test_defaults")

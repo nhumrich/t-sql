@@ -69,7 +69,7 @@ def test_correct_final_query_with_literals():
 def test_disallows_bad_literals():
     table = "users'"
     col = "name"
-    with pytest.raises(ValueError):  # TODO: change to appropriate error
+    with pytest.raises(ValueError):
         result = tsql.render(t'select id, {col:literal} from {table:literal}')
 
 

@@ -429,3 +429,29 @@ async def test_like_pattern_format_specs(conn):
     # Should match john_doe
     assert len(rows) == 1
     assert rows[0][0] == 'john_doe'
+
+
+async def test_insert_all_defaults_with_returning(conn):
+    """Insert with empty values uses DEFAULT VALUES on SQLite."""
+    from tsql.query_builder import Column
+
+    await conn.execute("""
+        CREATE TABLE test_defaults (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT DEFAULT 'draft'
+        )
+    """)
+    await conn.commit()
+
+    class TestDefaults(Table, table_name='test_defaults'):
+        id: Column
+        status: Column
+
+    sql, params = TestDefaults.insert().returning('id', 'status').render()
+    assert sql == 'INSERT INTO test_defaults DEFAULT VALUES RETURNING id, status'
+    assert params == []
+
+    cursor = await conn.execute(sql, params)
+    row = await cursor.fetchone()
+    assert row[0] is not None
+    assert row[1] == 'draft'

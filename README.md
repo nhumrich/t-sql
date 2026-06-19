@@ -300,6 +300,31 @@ query = (Posts.select()
          .left_join(Users, on=Posts.user_id == Users.id))
 ```
 
+### Raw JOIN clauses (escape hatch)
+
+For join shapes the typed `join()`/`left_join()`/`right_join()` can't express —
+LATERAL subqueries, ON-less cross joins, set-returning functions — use
+`join_raw()` to splice a complete JOIN clause Template verbatim. The Template
+must carry the **whole** clause including the join keyword; nothing is added
+around it. Parameters inside the Template are still parameterized and renumber
+correctly alongside the rest of the query.
+
+```python
+query = (SelectQueryBuilder.from_table('records', schema='dataset', alias='t')
+         .select(t't.*')
+         .join_raw(t'CROSS JOIN LATERAL unnest(t.tags) AS tag'))
+
+# Parameterized raw join, composed with a WHERE clause
+query = (SelectQueryBuilder.from_table('records', alias='t')
+         .select(t't.*')
+         .join_raw(t'LEFT JOIN other o ON o.id = t.ref AND o.kind = {"x"}')
+         .where(t't.active = {True}'))
+```
+
+> ⚠️ **Not advised.** `join_raw()` bypasses the builder's join structure. Prefer
+> the typed `join()`/`left_join()`/`right_join()` with a Table + Condition
+> wherever they suffice.
+
 ## Query Features
 
 ### Selecting All Columns from a Table
@@ -322,6 +347,34 @@ query = Posts.select(Posts.ALL, Users.ALL).join(Users, Posts.user_id == Users.id
 ```
 
 This is particularly useful when joining tables where you want all columns from one table but only specific columns from others.
+
+### DISTINCT ON (PostgreSQL)
+
+`distinct_on()` emits a `SELECT DISTINCT ON (...)` clause. It accepts Column
+objects, string column names, or raw Templates — coerced exactly like
+`select()`.
+
+```python
+query = Users.select(Users.id, Users.username).distinct_on('username')
+# ('SELECT DISTINCT ON (username) users.id, users.username FROM users', [])
+
+# Multiple columns are comma-joined inside the parens
+query = Users.select(Users.id).distinct_on('username', 'email')
+# ('SELECT DISTINCT ON (username, email) users.id FROM users', [])
+```
+
+### FROM ONLY and Table Aliases
+
+When building from a string table name, `from_table()` accepts `only=True` to
+emit `FROM ONLY {table}` (excludes inheriting child tables in PostgreSQL) and
+`alias=...` to emit `FROM {table} AS {alias}` (the alias is identifier-validated):
+
+```python
+query = (SelectQueryBuilder.from_table('records', schema='dataset', alias='t', only=True)
+         .select(t't.*')
+         .where(t't.active = {True}'))
+# ('SELECT t.* FROM ONLY dataset.records AS t WHERE (t.active = $1)', [True])
+```
 
 ### NULL Checks and Other Operators
 
@@ -348,6 +401,11 @@ query = Users.select().where(Users.age.not_between(18, 65))
 query = Posts.select().order_by(Posts.id)  # defaults to ASC
 query = Posts.select().order_by(Posts.id.desc())
 query = Posts.select().order_by(Posts.created_at.asc(), Posts.id.desc())
+
+# ORDER BY / GROUP BY also accept raw Templates, emitted verbatim
+# (parity with where()/having()/select()), for computed expressions:
+query = Posts.select().order_by(t'lower(title) DESC')
+query = Posts.select().group_by(t"date_trunc('day', created_at)")
 
 # LIMIT and OFFSET
 query = Posts.select().limit(10).offset(20)

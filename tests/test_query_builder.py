@@ -216,6 +216,57 @@ def test_left_join():
     assert 'LEFT JOIN posts ON users.id = posts.user_id' in sql
 
 
+def test_join_raw_template():
+    """join_raw() splices a raw t-string Template verbatim as a whole JOIN clause."""
+    query = (SelectQueryBuilder.from_table('records', schema='dataset', alias='t')
+             .select(t't.*')
+             .join_raw(t'LEFT JOIN other o ON o.id = t.ref'))
+    sql, params = query.render()
+
+    assert sql == 'SELECT t.* FROM dataset.records AS t LEFT JOIN other o ON o.id = t.ref'
+    assert params == []
+
+
+def test_join_raw_lateral_no_on():
+    """join_raw() handles join shapes the typed path can't: LATERAL, no ON."""
+    query = (SelectQueryBuilder.from_table('records', schema='dataset', alias='t')
+             .select(t't.*')
+             .join_raw(t'CROSS JOIN LATERAL unnest(t.tags) AS tag'))
+    sql, params = query.render()
+
+    assert sql == 'SELECT t.* FROM dataset.records AS t CROSS JOIN LATERAL unnest(t.tags) AS tag'
+    assert params == []
+
+
+def test_join_raw_template_carries_params():
+    """A parameterized raw join Template renumbers correctly in context."""
+    query = (SelectQueryBuilder.from_table('records', schema='dataset', alias='t')
+             .select(t't.*')
+             .join_raw(t'LEFT JOIN other o ON o.id = t.ref AND o.kind = {"x"}')
+             .where(t't.active = {True}'))
+    sql, params = query.render(style=tsql.styles.NUMERIC_DOLLAR)
+
+    assert sql == (
+        'SELECT t.* FROM dataset.records AS t '
+        'LEFT JOIN other o ON o.id = t.ref AND o.kind = $1 '
+        'WHERE (t.active = $2)'
+    )
+    assert params == ['x', True]
+
+
+def test_join_raw_and_typed_mixed():
+    """Raw and typed joins compose in insertion order."""
+    query = (Posts.select(Posts.ALL)
+             .join(Users, Posts.user_id == Users.id)
+             .join_raw(t'LEFT JOIN tags tg ON tg.post_id = posts.id'))
+    sql, params = query.render()
+
+    assert 'INNER JOIN users ON posts.user_id = users.id' in sql
+    assert 'LEFT JOIN tags tg ON tg.post_id = posts.id' in sql
+    # typed join comes first (added first), raw second
+    assert sql.index('INNER JOIN users') < sql.index('LEFT JOIN tags')
+
+
 def test_order_by():
     """Test ORDER BY clause"""
     query = Users.select().order_by(Users.username)

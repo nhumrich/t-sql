@@ -614,10 +614,11 @@ class QueryBuilder(ABC):
                     result_key = col.alias if col.alias else col.column_name
                     processors[result_key] = col.type_processor
         else:
-            # SELECT * - check all tables involved (base table + joins)
+            # SELECT * - check all tables involved (base table + joins).
+            # Raw-Template joins carry no introspectable table, so skip them.
             tables = [self.base_table]
             if hasattr(self, '_joins'):
-                tables.extend(join.table for join in self._joins)
+                tables.extend(join.table for join in self._joins if not isinstance(join, Template))
 
             for table in tables:
                 processors.update(table._type_processors)
@@ -1166,7 +1167,7 @@ class SelectQueryBuilder(QueryBuilder):
         self.base_table = base_table
         self._columns: Optional[List[Union[Column, str]]] = None
         self._conditions: List[Union[Condition, Template]] = []
-        self._joins: List[Join] = []
+        self._joins: List[Union[Join, Template]] = []
         self._group_by_columns: List[Union[Column, Template, str]] = []
         self._having_conditions: List[Union[Condition, Template]] = []
         self._order_by_columns: List[tuple[Union[Column, Template, str], str]] = []
@@ -1262,6 +1263,23 @@ class SelectQueryBuilder(QueryBuilder):
     def join(self, table: type['Table'], on: Condition, join_type: str = 'INNER') -> 'SelectQueryBuilder':
         """Add a JOIN clause"""
         self._joins.append(Join(table, on, join_type))
+        return self
+
+    def join_raw(self, clause: Template) -> 'SelectQueryBuilder':
+        """Splice a raw t-string Template as a complete JOIN clause, verbatim.
+
+        The Template must carry the *whole* clause including the join keyword, e.g.
+        ``t'LEFT JOIN LATERAL (SELECT ...) x ON TRUE'`` or
+        ``t'CROSS JOIN LATERAL unnest({col}) AS y'``. Unlike join(), nothing is added
+        around it — no join type, no ON.
+
+        NOT ADVISED: this is an escape hatch for join shapes the typed join() can't
+        express (LATERAL subqueries, ON-less cross joins, correlated set-returning
+        functions). It bypasses every safety/structure the builder provides. Prefer
+        join()/left_join()/right_join() with a Table + Condition. This method may be
+        removed if those typed paths grow to cover the remaining cases.
+        """
+        self._joins.append(clause)
         return self
 
     def left_join(self, table: type['Table'], on: Condition) -> 'SelectQueryBuilder':
@@ -1453,7 +1471,7 @@ class SelectQueryBuilder(QueryBuilder):
             parts.append(t'FROM {only_kw}{table_name:literal}')
 
         for join in self._joins:
-            parts.append(join.to_tsql())
+            parts.append(join if isinstance(join, Template) else join.to_tsql())
 
         if self._conditions:
             where_parts = []

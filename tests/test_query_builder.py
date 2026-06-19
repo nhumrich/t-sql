@@ -1,5 +1,5 @@
 import tsql
-from tsql.query_builder import Table, Column, Condition, InsertBuilder, UpdateBuilder, DeleteBuilder
+from tsql.query_builder import Table, Column, Condition, InsertBuilder, UpdateBuilder, DeleteBuilder, SelectQueryBuilder
 
 
 class Users(Table):
@@ -1623,4 +1623,208 @@ def test_delete_where_with_bare_boolean_column():
 
     assert 'DELETE FROM contacts' in sql
     assert 'WHERE contacts.is_primary' in sql
+    assert params == []
+
+
+# --------------------------------------------------------------------------- #
+# DISTINCT ON
+# --------------------------------------------------------------------------- #
+
+
+def test_distinct_on_string_column():
+    """distinct_on() with a string column emits SELECT DISTINCT ON (col)"""
+    query = Users.select(Users.id, Users.username).distinct_on('username')
+    sql, params = query.render()
+
+    assert sql == 'SELECT DISTINCT ON (username) users.id, users.username FROM users'
+    assert params == []
+
+
+def test_distinct_on_multiple_columns():
+    """distinct_on() accepts multiple columns, comma-joined inside the parens"""
+    query = Users.select(Users.id).distinct_on('username', 'email')
+    sql, params = query.render()
+
+    assert sql == 'SELECT DISTINCT ON (username, email) users.id FROM users'
+    assert params == []
+
+
+def test_distinct_on_column_object():
+    """distinct_on() accepts Column objects, coerced like select()"""
+    query = Users.select(Users.id).distinct_on(Users.username)
+    sql, params = query.render()
+
+    assert sql == 'SELECT DISTINCT ON (users.username) users.id FROM users'
+    assert params == []
+
+
+def test_distinct_on_template_fragment():
+    """distinct_on() accepts raw t-string fragments (the field-type seam)"""
+    query = Users.select(Users.id).distinct_on(t'users.username')
+    sql, params = query.render()
+
+    assert sql == 'SELECT DISTINCT ON (users.username) users.id FROM users'
+    assert params == []
+
+
+def test_distinct_on_select_star():
+    """distinct_on() works with SELECT * (no explicit columns)"""
+    query = Users.select().distinct_on('username')
+    sql, params = query.render()
+
+    assert sql == 'SELECT DISTINCT ON (username) * FROM users'
+    assert params == []
+
+
+def test_no_distinct_on_unaffected():
+    """A query without distinct_on() is unchanged"""
+    query = Users.select(Users.id)
+    sql, params = query.render()
+
+    assert sql == 'SELECT users.id FROM users'
+    assert params == []
+
+
+# --------------------------------------------------------------------------- #
+# FROM ONLY  (Postgres table inheritance)
+# --------------------------------------------------------------------------- #
+
+
+def test_from_only_flag():
+    """from_table(only=True) makes the builder emit FROM ONLY {table}"""
+    query = SelectQueryBuilder.from_table('users', only=True).select('id')
+    sql, params = query.render()
+
+    assert sql == 'SELECT id FROM ONLY users'
+    assert params == []
+
+
+def test_from_only_with_schema():
+    """FROM ONLY respects the schema-qualified table name"""
+    query = SelectQueryBuilder.from_table('records', schema='dataset', only=True)
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM ONLY dataset.records'
+    assert params == []
+
+
+def test_from_only_default_off():
+    """Without only=True, FROM is unchanged (no ONLY keyword)"""
+    query = SelectQueryBuilder.from_table('users').select('id')
+    sql, params = query.render()
+
+    assert 'FROM ONLY' not in sql
+    assert 'FROM users' in sql
+
+
+def test_distinct_on_and_from_only_together():
+    """DISTINCT ON and FROM ONLY compose"""
+    query = (SelectQueryBuilder.from_table('records', schema='dataset', only=True)
+             .select(t't.*')
+             .distinct_on('t.id'))
+    sql, params = query.render()
+
+    assert sql == 'SELECT DISTINCT ON (t.id) t.* FROM ONLY dataset.records'
+    assert params == []
+
+
+# --------------------------------------------------------------------------- #
+# FROM table alias
+# --------------------------------------------------------------------------- #
+
+
+def test_from_table_alias():
+    """from_table(alias=...) emits FROM {table} AS {alias}"""
+    query = SelectQueryBuilder.from_table('records', schema='dataset', alias='t').select(t't.*')
+    sql, params = query.render()
+
+    assert sql == 'SELECT t.* FROM dataset.records AS t'
+    assert params == []
+
+
+def test_from_table_alias_and_only():
+    """alias and only compose: FROM ONLY {table} AS {alias}"""
+    query = SelectQueryBuilder.from_table('records', schema='dataset', alias='t', only=True).select(
+        t't.*'
+    )
+    sql, params = query.render()
+
+    assert sql == 'SELECT t.* FROM ONLY dataset.records AS t'
+    assert params == []
+
+
+def test_from_table_alias_default_none():
+    """Without alias, no AS clause is emitted"""
+    query = SelectQueryBuilder.from_table('users')
+    sql, params = query.render()
+
+    assert ' AS ' not in sql
+    assert sql == 'SELECT * FROM users'
+
+
+def test_from_table_alias_rejects_injection():
+    """alias goes through :literal and rejects a non-identifier"""
+    import pytest
+
+    query = SelectQueryBuilder.from_table('users', alias='t; DROP TABLE x')
+    with pytest.raises(ValueError):
+        query.render()
+
+
+# --------------------------------------------------------------------------- #
+# Template-aware ORDER BY / GROUP BY  (parity with where/having/select)
+# --------------------------------------------------------------------------- #
+
+
+def test_order_by_template_fragment():
+    """order_by() accepts a raw t-string fragment, emitted verbatim (no added direction)."""
+    query = Users.select(Users.id).order_by(t'lower(users.username) DESC NULLS LAST')
+    sql, params = query.render()
+
+    assert sql == 'SELECT users.id FROM users ORDER BY lower(users.username) DESC NULLS LAST'
+    assert params == []
+
+
+def test_order_by_template_carries_params():
+    """A parameterized ORDER BY fragment renumbers correctly in context."""
+    query = (Users.select(Users.id)
+             .where(Users.id > 5)
+             .order_by(t'(users.username = {"vip"}) DESC'))
+    sql, params = query.render(style=tsql.styles.NUMERIC_DOLLAR)
+
+    assert sql == 'SELECT users.id FROM users WHERE users.id > $1 ORDER BY (users.username = $2) DESC'
+    assert params == [5, 'vip']
+
+
+def test_order_by_mixed_template_and_column():
+    """Template fragments and Column/str order_by entries compose in order."""
+    query = (Users.select(Users.id)
+             .order_by(t'lower(users.username) ASC')
+             .order_by(Users.id.desc()))
+    sql, params = query.render()
+
+    assert sql == 'SELECT users.id FROM users ORDER BY lower(users.username) ASC, users.id DESC'
+    assert params == []
+
+
+def test_group_by_template_fragment():
+    """group_by() accepts a raw t-string fragment, emitted verbatim."""
+    query = Users.select(t'date_trunc({"day":unsafe}, users.created_at)').group_by(
+        t'date_trunc(day, users.created_at)'
+    )
+    sql, params = query.render()
+
+    assert sql == (
+        'SELECT date_trunc(day, users.created_at) FROM users '
+        'GROUP BY date_trunc(day, users.created_at)'
+    )
+    assert params == []
+
+
+def test_group_by_mixed_template_and_column():
+    """Template fragments and Column/str group_by entries compose in order."""
+    query = Users.select(Users.id).group_by(Users.id).group_by(t'lower(users.email)')
+    sql, params = query.render()
+
+    assert sql == 'SELECT users.id FROM users GROUP BY users.id, lower(users.email)'
     assert params == []

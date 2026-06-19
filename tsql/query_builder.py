@@ -1167,31 +1167,47 @@ class SelectQueryBuilder(QueryBuilder):
         self._columns: Optional[List[Union[Column, str]]] = None
         self._conditions: List[Union[Condition, Template]] = []
         self._joins: List[Join] = []
-        self._group_by_columns: List[Union[Column, str]] = []
+        self._group_by_columns: List[Union[Column, Template, str]] = []
         self._having_conditions: List[Union[Condition, Template]] = []
-        self._order_by_columns: List[tuple[Union[Column, str], str]] = []
+        self._order_by_columns: List[tuple[Union[Column, Template, str], str]] = []
         self._limit_value: Optional[int] = None
         self._offset_value: Optional[int] = None
         self._ctes: List[tuple[str, Union[Template, TSQL, 'SelectQueryBuilder'], bool]] = []
+        self._distinct_on_columns: List[Union[Column, Template, str]] = []
+        self._only: bool = False
+        self._alias: Optional[str] = None
 
     @classmethod
-    def from_table(cls, table_name: str, schema: Optional[str] = None) -> 'SelectQueryBuilder':
+    def from_table(
+        cls,
+        table_name: str,
+        schema: Optional[str] = None,
+        *,
+        only: bool = False,
+        alias: Optional[str] = None,
+    ) -> 'SelectQueryBuilder':
         """Create a SelectQueryBuilder from a string table name.
 
         Args:
             table_name: Name of the table
             schema: Optional schema name
+            only: Emit ``FROM ONLY {table}`` to exclude inheriting child tables (PostgreSQL)
+            alias: Optional FROM-clause alias, emitted as ``FROM {table} AS {alias}``
+                (validated as an identifier)
 
         Returns:
             SelectQueryBuilder instance
 
         Example:
-            SelectQueryBuilder.from_table('users', schema='public') \\
-                .select('id', 'name') \\
-                .where(t'status = {status}')
+            SelectQueryBuilder.from_table('users', schema='public', alias='u') \\
+                .select('u.id', 'u.name') \\
+                .where(t'u.status = {status}')
         """
         string_table = _StringTable(table_name, schema)
-        return cls(string_table)
+        builder = cls(string_table)
+        builder._only = only
+        builder._alias = alias
+        return builder
 
     def select(self, *columns: Union[Column, Template, str]) -> 'SelectQueryBuilder':
         """Specify columns to select
@@ -1221,6 +1237,20 @@ class SelectQueryBuilder(QueryBuilder):
             self._columns = None
         return self
 
+    def distinct_on(self, *columns: Union[Column, Template, str]) -> 'SelectQueryBuilder':
+        """Add a DISTINCT ON (...) clause (PostgreSQL).
+
+        Args:
+            columns: Column objects, raw t-string Templates, or string column names,
+                coerced exactly like select().
+
+        Example:
+            SelectQueryBuilder.from_table('events').distinct_on('user_id')
+            # SELECT DISTINCT ON (user_id) * FROM events
+        """
+        self._distinct_on_columns.extend(columns)
+        return self
+
     def where(self, condition: Union[Condition, Template, Column]) -> 'SelectQueryBuilder':
         """Add a WHERE condition (multiple calls are ANDed together)
 
@@ -1242,11 +1272,13 @@ class SelectQueryBuilder(QueryBuilder):
         """Add a RIGHT JOIN clause"""
         return self.join(table, on, 'RIGHT')
 
-    def order_by(self, *columns: Union[Column, OrderByClause, str], direction: str = 'ASC') -> 'SelectQueryBuilder':
+    def order_by(self, *columns: Union[Column, OrderByClause, Template, str], direction: str = 'ASC') -> 'SelectQueryBuilder':
         """Add ORDER BY clause
 
         Args:
-            columns: Column objects, OrderByClause objects (from .asc()/.desc()), or string column names
+            columns: Column objects, OrderByClause objects (from .asc()/.desc()), raw
+                t-string Templates (emitted verbatim — bake the direction in yourself),
+                or string column names
             direction: Sort direction ('ASC' or 'DESC') for columns that don't have explicit direction
 
         Examples:
@@ -1270,15 +1302,19 @@ class SelectQueryBuilder(QueryBuilder):
                 self._order_by_columns.append((column, direction.upper()))
         return self
 
-    def group_by(self, *columns: Union[Column, str]) -> 'SelectQueryBuilder':
+    def group_by(self, *columns: Union[Column, Template, str]) -> 'SelectQueryBuilder':
         """Add GROUP BY clause
 
         Args:
-            columns: Column objects or string column names
+            columns: Column objects, raw t-string Templates (emitted verbatim), or
+                string column names
 
         Examples:
             # String-based GROUP BY
             SelectQueryBuilder.from_table('orders').select('user_id', 'COUNT(*)').group_by('user_id')
+
+            # Raw expression via t-string
+            Orders.select().group_by(t'date_trunc({"day":unsafe}, orders.created_at)')
         """
         self._group_by_columns.extend(columns)
         return self
@@ -1350,6 +1386,18 @@ class SelectQueryBuilder(QueryBuilder):
         self._ctes.append((name, query, recursive))
         return self
 
+    @staticmethod
+    def _coerce_column(col: Union['Column', Template, str]) -> Template:
+        """Coerce a SELECT/DISTINCT ON column into a t-string fragment."""
+        if isinstance(col, Template):
+            return col
+        elif isinstance(col, str):
+            # String column name, use :literal for validation
+            return t'{col:literal}'
+        else:
+            # Column object, convert to string
+            return t'{str(col):unsafe}'
+
     def to_tsql(self) -> TSQL:
         """Build the final TSQL object"""
         parts: List[Template] = []
@@ -1380,29 +1428,29 @@ class SelectQueryBuilder(QueryBuilder):
             else:
                 parts.append(t'WITH {cte_clause}')
 
-        if self._columns:
-            # Build column list, handling Column objects, Template (t-string) objects, and strings
-            column_parts = []
-            for col in self._columns:
-                if isinstance(col, Template):
-                    column_parts.append(col)
-                elif isinstance(col, str):
-                    # String column name, use :literal for validation
-                    column_parts.append(t'{col:literal}')
-                else:
-                    # Column object, convert to string
-                    column_parts.append(t'{str(col):unsafe}')
-
-            columns_template = t_join(t', ', column_parts)
-            parts.append(t'SELECT {columns_template}')
+        # DISTINCT ON (...) clause, coercing columns exactly like the SELECT list
+        if self._distinct_on_columns:
+            distinct_on_template = t_join(t', ', [self._coerce_column(c) for c in self._distinct_on_columns])
+            distinct_clause = t'DISTINCT ON ({distinct_on_template}) '
         else:
-            parts.append(t'SELECT *')
+            distinct_clause = t''
+
+        if self._columns:
+            column_parts = [self._coerce_column(col) for col in self._columns]
+            columns_template = t_join(t', ', column_parts)
+            parts.append(t'SELECT {distinct_clause}{columns_template}')
+        else:
+            parts.append(t'SELECT {distinct_clause}*')
 
         if self.base_table.schema:
             table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
         else:
             table_name = self.base_table.table_name
-        parts.append(t'FROM {table_name:literal}')
+        only_kw = t'ONLY ' if self._only else t''
+        if self._alias is not None:
+            parts.append(t'FROM {only_kw}{table_name:literal} AS {self._alias:literal}')
+        else:
+            parts.append(t'FROM {only_kw}{table_name:literal}')
 
         for join in self._joins:
             parts.append(join.to_tsql())
@@ -1423,7 +1471,9 @@ class SelectQueryBuilder(QueryBuilder):
         if self._group_by_columns:
             group_by_parts = []
             for col in self._group_by_columns:
-                if isinstance(col, str):
+                if isinstance(col, Template):
+                    group_by_parts.append(col)
+                elif isinstance(col, str):
                     group_by_parts.append(t'{col:literal}')
                 else:
                     col_str = str(col)
@@ -1444,7 +1494,10 @@ class SelectQueryBuilder(QueryBuilder):
         if self._order_by_columns:
             order_parts = []
             for col, direction in self._order_by_columns:
-                if isinstance(col, str):
+                if isinstance(col, Template):
+                    # Raw fragment is self-contained (direction baked in); emit verbatim
+                    order_parts.append(col)
+                elif isinstance(col, str):
                     # String column name - validate with :literal
                     order_parts.append(t'{col:literal} {direction:unsafe}')
                 else:

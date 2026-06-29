@@ -637,6 +637,8 @@ pip install t-sql[sqlalchemy]
 uv add t-sql --optional sqlalchemy
 ```
 
+> Note: the `sqlalchemy` extra installs SQLAlchemy only. Alembic is not a t-sql dependency — if you use alembic autogenerate, add `alembic` to your own project's dependencies (it's your migration tooling, not ours).
+
 ### Two Ways to Define Columns
 
 **1. Simple Column annotations** (for query builder only):

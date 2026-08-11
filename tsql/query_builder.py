@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Union, ClassVar
+from typing import Any, Iterable, List, Optional, Union, ClassVar
 from string.templatelib import Template
 from datetime import datetime
 from abc import ABC, abstractmethod
@@ -39,9 +39,23 @@ except ImportError:
 
 _VALID_DIRECTIONS = frozenset({'ASC', 'DESC'})
 _VALID_NULLS = frozenset({'NULLS FIRST', 'NULLS LAST'})
+_VALID_OPERATORS = frozenset({
+    'IS', 'IS NOT', '=', '!=', '<', '<=', '>', '>=',
+    'IN', 'NOT IN', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE',
+    'BETWEEN', 'NOT BETWEEN',
+})
+# CROSS is deliberately absent: Join.to_tsql always emits ON, so a cross join can only
+# be expressed through join_raw().
+_VALID_JOIN_TYPES = frozenset({'INNER', 'LEFT', 'RIGHT', 'FULL'})
+_JOIN_TYPE_ALIASES = {
+    'LEFT OUTER': 'LEFT',
+    'RIGHT OUTER': 'RIGHT',
+    'FULL OUTER': 'FULL',
+}
 
 
-def _validate_keyword(value: Any, allowed: frozenset[str], field: str, hint: str) -> str:
+def _validate_keyword(value: Any, allowed: frozenset[str], field: str, hint: str,
+                      aliases: Optional[dict[str, str]] = None) -> str:
     """Normalize a caller-supplied SQL keyword and reject anything outside `allowed`.
 
     Keyword values cross the API boundary as plain strings and are rendered into the
@@ -52,12 +66,143 @@ def _validate_keyword(value: Any, allowed: frozenset[str], field: str, hint: str
     # pass the check while its real buffer carries a payload. These return a plain
     # str, which is what gets stored and rendered.
     normalized = str.upper(str.strip(value)) if isinstance(value, str) else None
+    if aliases and normalized is not None:
+        normalized = aliases.get(normalized, normalized)
     if normalized not in allowed:
         raise ValueError(
             f"Invalid {field} {value!r}: must be one of "
             f"{', '.join(repr(a) for a in sorted(allowed))}. {hint}"
         )
     return normalized
+
+
+_COLUMN_FIELD_HINT = (
+    "Use schema= rather than a dotted table name; for an expression or a quoted name, "
+    "pass a t-string Template wherever a Column is accepted (note a Table field cannot "
+    "be one)."
+)
+
+
+_NAME_LIST_HINT = "Pass one plain column name per argument."
+
+_COLUMN_REF_HINT = (
+    "A column reference is 'column', 'table.column' or 'schema.table.column'; for a "
+    "wildcard, an expression or a quoted name, pass a t-string Template instead "
+    "(e.g. t'*', t'users.*', t'COUNT(*)')."
+)
+
+
+def _validate_identifier(value: Any, field: str, allow_star: bool = False,
+                         hint: str = _COLUMN_FIELD_HINT) -> str:
+    """Reject anything that is not a single bare SQL identifier.
+
+    Each name field of a Column is one part of a qualified name, so a dotted value is
+    as wrong as a payload. Unbound `str.isidentifier` for the same reason as
+    `_validate_keyword`; `str.__str__` rather than `str()`, because a subclass whose
+    buffer passes the check can still override `__str__` to return a payload.
+    """
+    if isinstance(value, str):
+        if allow_star and str.__eq__(value, '*'):
+            return '*'
+        if str.isidentifier(value):
+            return str.__str__(value)
+    expected = "a single unqualified SQL identifier"
+    if allow_star:
+        expected += " (or '*')"
+    raise ValueError(f"Invalid {field} {value!r}: must be {expected}. {hint}")
+
+
+def _validate_optional_identifier(value: Any, field: str,
+                                  allow_star: bool = False) -> Optional[str]:
+    """A Column name field may be absent: a class-body sentinel carries no table yet."""
+    if value is None:
+        return None
+    return _validate_identifier(value, field, allow_star)
+
+
+def _qualified_table(table: Any) -> Template:
+    """`schema.table` with the dot written here and each part validated separately.
+
+    `:literal` takes one identifier, so a composed `f"{schema}.{table}"` cannot be handed
+    to it. Writing the dot in the t-string is the same pattern callers use, and it keeps
+    the qualifier out of any single caller-supplied value.
+    """
+    table_name = _validate_identifier(table.table_name, 'table name')
+    if table.schema:
+        schema = _validate_identifier(table.schema, 'schema')
+        return t'{schema:literal}.{table_name:literal}'
+    return t'{table_name:literal}'
+
+
+def _column_ref(column: Any, with_alias: bool = False) -> Template:
+    """`schema.table.column` built the same way as `_qualified_table`, one part per splice.
+
+    A bare `Column` used as a condition (`.where(Users.is_active)`) used to be stringified
+    and handed to `:literal` whole; the dots now belong to the t-string. An alias has no
+    meaning in a predicate and never rendered as valid SQL here, so it is still refused
+    unless the caller is building a SELECT-list entry.
+    """
+    if column.alias and not with_alias:
+        raise ValueError(
+            f"Invalid column reference {str(column)!r}: an aliased Column is a SELECT "
+            f"output name, not a predicate. Drop the alias, or pass a t-string Template."
+        )
+    column_name = column.column_name
+    if isinstance(column_name, str) and str.__eq__(column_name, '*'):
+        # Table.ALL is Column(table_name, '*'); the constructor stores the plain '*' it
+        # validated, so the wildcard is written here rather than spliced.
+        ref = t'*'
+    else:
+        ref = t'{column_name:literal}'
+    if column.table_name:
+        table_name = column.table_name
+        ref = t'{table_name:literal}.{ref}'
+        if column.schema:
+            schema = column.schema
+            ref = t'{schema:literal}.{ref}'
+    if column.alias:
+        alias = column.alias
+        ref = t'{ref} AS {alias:literal}'
+    return ref
+
+
+def _qualified_name(value: Any, field: str) -> Template:
+    """A possibly-dotted column reference, split here so each part is its own `:literal`.
+
+    A qualified *column* cannot escape the query's scope the way a table name can: the
+    FROM clause already fixes which tables are reachable, so `select('users.id')` names
+    one of them or nothing at all. `str.split` unbound, for the same reason the parts are
+    checked with unbound `str.isidentifier` — a subclass can lie about either.
+    """
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Invalid {field} {value!r}: must be a string. {_COLUMN_REF_HINT}"
+        )
+    parts = str.split(value, '.')
+    return t_join(t'.', [
+        t'{_validate_identifier(p, field, hint=_COLUMN_REF_HINT):literal}' for p in parts
+    ])
+
+
+def _join_identifiers(values: Iterable[Any], field: str) -> str:
+    """Comma-join a name list, built from the validated names rather than the originals."""
+    return ', '.join(
+        _validate_identifier(v, field, hint=_NAME_LIST_HINT) for v in values
+    )
+
+
+def _returning_clause(returning_cols: List[Any]) -> Template:
+    """`RETURNING *`, or RETURNING over a validated name list.
+
+    The wildcard check compares buffers with unbound `str.__eq__`, because
+    `returning_cols != ['*']` delegates to the element's `__eq__` — a subclass that
+    always answers equal would skip validation entirely.
+    """
+    if (len(returning_cols) == 1 and isinstance(returning_cols[0], str)
+            and str.__eq__(returning_cols[0], '*')):
+        return t'RETURNING *'
+    returning_str = _join_identifiers(returning_cols, 'RETURNING column name')
+    return t'RETURNING {returning_str:unsafe}'
 
 
 def _validate_direction(direction: str) -> str:
@@ -80,6 +225,30 @@ def _validate_nulls(nulls: Optional[str]) -> Optional[str]:
         'ORDER BY NULLS ordering',
         "Prefer the .nulls_first() / .nulls_last() methods. For any other "
         "expression pass a t-string Template to order_by().",
+    )
+
+
+def _validate_operator(operator: str) -> str:
+    return _validate_keyword(
+        operator,
+        _VALID_OPERATORS,
+        'condition operator',
+        "These are the operators the Column comparison API emits. For any other "
+        "predicate pass a t-string Template to where() "
+        "(e.g. where(t'users.age IS DISTINCT FROM {value}')).",
+    )
+
+
+def _validate_join_type(join_type: str) -> str:
+    outer_spellings = ', '.join(repr(k) for k in sorted(_JOIN_TYPE_ALIASES))
+    return _validate_keyword(
+        join_type,
+        _VALID_JOIN_TYPES,
+        'join type',
+        f"The OUTER spellings ({outer_spellings}) are also accepted and normalize to "
+        "the bare keyword. For a CROSS, LATERAL or vendor-specific join use "
+        "join_raw() with a t-string Template.",
+        aliases=_JOIN_TYPE_ALIASES,
     )
 
 
@@ -117,10 +286,10 @@ class Column:
     """Represents a bound column (table + column name) for building queries"""
 
     def __init__(self, table_name: str | None = None, column_name: str | None = None, alias: str | None = None, schema: str | None = None, type_processor: Any | None = None):
-        self.table_name = table_name
-        self.column_name = column_name
-        self.alias = alias
-        self.schema = schema
+        self.table_name = _validate_optional_identifier(table_name, 'table name')
+        self.column_name = _validate_optional_identifier(column_name, 'column name', allow_star=True)
+        self.alias = _validate_optional_identifier(alias, 'alias')
+        self.schema = _validate_optional_identifier(schema, 'schema')
         self.type_processor = type_processor
 
     def __str__(self) -> str:
@@ -136,6 +305,14 @@ class Column:
         if self.alias:
             return f"Column({self.table_name!r}, {self.column_name!r}, alias={self.alias!r})"
         return f"Column({self.table_name!r}, {self.column_name!r})"
+
+    def to_tsql(self) -> TSQL:
+        """Splice this column into a t-string: `t'{Users.name} LIKE {pattern}'`.
+
+        This replaces `str(col):literal`, which a literal being a single identifier no
+        longer accepts — the dots belong to the query, so the Column writes them.
+        """
+        return TSQL(_column_ref(self, with_alias=True))
 
     def as_(self, alias: str) -> 'Column':
         """Create a new Column with an alias for use in SELECT clauses
@@ -546,8 +723,14 @@ class Condition:
     """Represents a WHERE clause condition"""
 
     def __init__(self, left: Column, operator: str, right: Any):
+        if not isinstance(left, Column):
+            raise ValueError(
+                f"Invalid condition left operand {left!r}: must be a Column. Pass a "
+                f"t-string Template to where() for a predicate this API cannot express "
+                f"(e.g. where(t'users.age IS DISTINCT FROM {{value}}'))."
+            )
         self.left = left
-        self.operator = operator
+        self.operator = _validate_operator(operator)
         self.right = right
 
     def to_tsql(self) -> Template:
@@ -608,17 +791,14 @@ class Join:
     def __init__(self, table: type['Table'], condition: Condition, join_type: str = 'INNER'):
         self.table = table
         self.condition = condition
-        self.join_type = join_type
+        self.join_type = _validate_join_type(join_type)
 
     def to_tsql(self) -> Template:
         """Convert join to a t-string fragment"""
-        if self.table.schema:
-            table_name = f"{self.table.schema}.{self.table.table_name}"
-        else:
-            table_name = self.table.table_name
+        table_expr = _qualified_table(self.table)
         join_type = self.join_type
         condition_tsql = self.condition.to_tsql()
-        return t'{join_type:unsafe} JOIN {table_name:literal} ON {condition_tsql}'
+        return t'{join_type:literal} JOIN {table_expr} ON {condition_tsql}'
 
 
 class QueryBuilder(ABC):
@@ -816,10 +996,7 @@ class InsertBuilder(QueryBuilder):
         """Build the final TSQL object"""
         parts: List[Template] = []
 
-        if self.base_table.schema:
-            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
-        else:
-            table_name = self.base_table.table_name
+        table_expr = _qualified_table(self.base_table)
 
         # Apply type processors to values
         values_dict = {}
@@ -828,11 +1005,11 @@ class InsertBuilder(QueryBuilder):
             values_dict[col_name] = _process_value_for_builder(value, processor)
 
         if not values_dict:
-            parts.append(t'INSERT INTO {table_name:literal} DEFAULT VALUES')
+            parts.append(t'INSERT INTO {table_expr} DEFAULT VALUES')
         elif self._ignore:
-            parts.append(t'INSERT IGNORE INTO {table_name:literal} {values_dict:as_values}')
+            parts.append(t'INSERT IGNORE INTO {table_expr} {values_dict:as_values}')
         else:
-            parts.append(t'INSERT INTO {table_name:literal} {values_dict:as_values}')
+            parts.append(t'INSERT INTO {table_expr} {values_dict:as_values}')
 
         # Add alias for ON DUPLICATE KEY UPDATE if needed
         if self._on_conflict_action == 'duplicate_key':
@@ -841,20 +1018,12 @@ class InsertBuilder(QueryBuilder):
         # ON CONFLICT clauses (Postgres/SQLite)
         if self._on_conflict_action == 'nothing':
             if self._conflict_cols:
-                # Validate all conflict columns
-                for col in self._conflict_cols:
-                    if not isinstance(col, str) or not col.isidentifier():
-                        raise ValueError(f"Invalid conflict column name: {col!r}")
-                conflict_cols_str = ', '.join(self._conflict_cols)
+                conflict_cols_str = _join_identifiers(self._conflict_cols, 'conflict column name')
                 parts.append(t'ON CONFLICT ({conflict_cols_str:unsafe}) DO NOTHING')
             else:
                 parts.append(t'ON CONFLICT DO NOTHING')
         elif self._on_conflict_action == 'update':
-            # Validate all conflict columns
-            for col in self._conflict_cols:
-                if not isinstance(col, str) or not col.isidentifier():
-                    raise ValueError(f"Invalid conflict column name: {col!r}")
-            conflict_cols_str = ', '.join(self._conflict_cols)
+            conflict_cols_str = _join_identifiers(self._conflict_cols, 'conflict column name')
 
             # Build UPDATE SET clause
             if self._update_cols:
@@ -906,13 +1075,7 @@ class InsertBuilder(QueryBuilder):
 
         # RETURNING clause
         if self._returning_cols is not None:
-            # Validate all returning columns (skip validation for '*')
-            if self._returning_cols != ['*']:
-                for col in self._returning_cols:
-                    if not isinstance(col, str) or not col.isidentifier():
-                        raise ValueError(f"Invalid RETURNING column name: {col!r}")
-            returning_str = ', '.join(self._returning_cols)
-            parts.append(t'RETURNING {returning_str:unsafe}')
+            parts.append(_returning_clause(self._returning_cols))
 
         return TSQL(t_join(t' ', parts))
 
@@ -1049,10 +1212,7 @@ class UpdateBuilder(QueryBuilder):
         """Build the final TSQL object"""
         parts: List[Template] = []
 
-        if self.base_table.schema:
-            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
-        else:
-            table_name = self.base_table.table_name
+        table_expr = _qualified_table(self.base_table)
 
         # Apply type processors to values
         values_dict = {}
@@ -1060,7 +1220,7 @@ class UpdateBuilder(QueryBuilder):
             processor = self.base_table._type_processors.get(col_name)
             values_dict[col_name] = _process_value_for_builder(value, processor)
 
-        parts.append(t'UPDATE {table_name:literal} SET {values_dict:as_set}')
+        parts.append(t'UPDATE {table_expr} SET {values_dict:as_set}')
 
         if self._conditions:
             where_parts = []
@@ -1068,21 +1228,14 @@ class UpdateBuilder(QueryBuilder):
                 if isinstance(cond, Template):
                     where_parts.append(t'({cond})')
                 elif isinstance(cond, Column):
-                    col_str = str(cond)
-                    where_parts.append(t'{col_str:literal}')
+                    where_parts.append(_column_ref(cond))
                 else:
                     where_parts.append(cond.to_tsql())
             combined_where = t_join(t' AND ', where_parts)
             parts.append(t'WHERE {combined_where}')
 
         if self._returning_cols is not None:
-            # Validate all returning columns (skip validation for '*')
-            if self._returning_cols != ['*']:
-                for col in self._returning_cols:
-                    if not isinstance(col, str) or not col.isidentifier():
-                        raise ValueError(f"Invalid RETURNING column name: {col!r}")
-            returning_str = ', '.join(self._returning_cols)
-            parts.append(t'RETURNING {returning_str:unsafe}')
+            parts.append(_returning_clause(self._returning_cols))
 
         return TSQL(t_join(t' ', parts))
 
@@ -1177,11 +1330,8 @@ class DeleteBuilder(QueryBuilder):
         """Build the final TSQL object"""
         parts: List[Template] = []
 
-        if self.base_table.schema:
-            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
-        else:
-            table_name = self.base_table.table_name
-        parts.append(t'DELETE FROM {table_name:literal}')
+        table_expr = _qualified_table(self.base_table)
+        parts.append(t'DELETE FROM {table_expr}')
 
         if self._conditions:
             where_parts = []
@@ -1189,21 +1339,14 @@ class DeleteBuilder(QueryBuilder):
                 if isinstance(cond, Template):
                     where_parts.append(t'({cond})')
                 elif isinstance(cond, Column):
-                    col_str = str(cond)
-                    where_parts.append(t'{col_str:literal}')
+                    where_parts.append(_column_ref(cond))
                 else:
                     where_parts.append(cond.to_tsql())
             combined_where = t_join(t' AND ', where_parts)
             parts.append(t'WHERE {combined_where}')
 
         if self._returning_cols is not None:
-            # Validate all returning columns (skip validation for '*')
-            if self._returning_cols != ['*']:
-                for col in self._returning_cols:
-                    if not isinstance(col, str) or not col.isidentifier():
-                        raise ValueError(f"Invalid RETURNING column name: {col!r}")
-            returning_str = ', '.join(self._returning_cols)
-            parts.append(t'RETURNING {returning_str:unsafe}')
+            parts.append(_returning_clause(self._returning_cols))
 
         return TSQL(t_join(t' ', parts))
 
@@ -1409,7 +1552,7 @@ class SelectQueryBuilder(QueryBuilder):
 
         Examples:
             # String-based GROUP BY
-            SelectQueryBuilder.from_table('orders').select('user_id', 'COUNT(*)').group_by('user_id')
+            SelectQueryBuilder.from_table('orders').select('user_id', t'COUNT(*)').group_by('user_id')
 
             # Raw expression via t-string
             Orders.select().group_by(t'date_trunc({"day":unsafe}, orders.created_at)')
@@ -1463,7 +1606,7 @@ class SelectQueryBuilder(QueryBuilder):
                 SelectQueryBuilder.from_table('filtered')
                 .with_cte('jennifers', Users.select().where(...))
                 .with_cte('filtered', t'SELECT id FROM jennifers WHERE age > 18')
-                .select('*')
+                .select(t'*')
             )
 
             # Recursive CTE
@@ -1475,11 +1618,14 @@ class SelectQueryBuilder(QueryBuilder):
                     SELECT c.id, c.name, c.parent_id FROM categories c
                     JOIN tree t ON c.parent_id = t.id
                 ''', recursive=True)
-                .select('*')
+                .select(t'*')
             )
         """
-        if not name.isidentifier():
-            raise ValueError(f"Invalid CTE name: {name!r}. Must be a valid Python identifier.")
+        name = _validate_identifier(
+            name, 'CTE name',
+            hint="The CTE body is where a t-string Template goes; the name itself is a "
+                 "bare identifier.",
+        )
 
         self._ctes.append((name, query, recursive))
         return self
@@ -1490,10 +1636,10 @@ class SelectQueryBuilder(QueryBuilder):
         if isinstance(col, Template):
             return col
         elif isinstance(col, str):
-            # String column name, use :literal for validation
-            return t'{col:literal}'
+            return _qualified_name(col, 'column name')
+        elif isinstance(col, Column):
+            return _column_ref(col, with_alias=True)
         else:
-            # Column object, convert to string
             return t'{str(col):unsafe}'
 
     def to_tsql(self) -> TSQL:
@@ -1540,15 +1686,12 @@ class SelectQueryBuilder(QueryBuilder):
         else:
             parts.append(t'SELECT {distinct_clause}*')
 
-        if self.base_table.schema:
-            table_name = f"{self.base_table.schema}.{self.base_table.table_name}"
-        else:
-            table_name = self.base_table.table_name
+        table_expr = _qualified_table(self.base_table)
         only_kw = t'ONLY ' if self._only else t''
         if self._alias is not None:
-            parts.append(t'FROM {only_kw}{table_name:literal} AS {self._alias:literal}')
+            parts.append(t'FROM {only_kw}{table_expr} AS {self._alias:literal}')
         else:
-            parts.append(t'FROM {only_kw}{table_name:literal}')
+            parts.append(t'FROM {only_kw}{table_expr}')
 
         for join in self._joins:
             parts.append(join if isinstance(join, Template) else join.to_tsql())
@@ -1559,8 +1702,7 @@ class SelectQueryBuilder(QueryBuilder):
                 if isinstance(cond, Template):
                     where_parts.append(t'({cond})')
                 elif isinstance(cond, Column):
-                    col_str = str(cond)
-                    where_parts.append(t'{col_str:literal}')
+                    where_parts.append(_column_ref(cond))
                 else:
                     where_parts.append(cond.to_tsql())
             combined_where = t_join(t' AND ', where_parts)
@@ -1572,7 +1714,9 @@ class SelectQueryBuilder(QueryBuilder):
                 if isinstance(col, Template):
                     group_by_parts.append(col)
                 elif isinstance(col, str):
-                    group_by_parts.append(t'{col:literal}')
+                    group_by_parts.append(_qualified_name(col, 'GROUP BY column name'))
+                elif isinstance(col, Column):
+                    group_by_parts.append(_column_ref(col, with_alias=True))
                 else:
                     col_str = str(col)
                     group_by_parts.append(t'{col_str:unsafe}')
@@ -1598,10 +1742,12 @@ class SelectQueryBuilder(QueryBuilder):
                     continue
 
                 if isinstance(col, str):
-                    # String column name - validate with :literal
-                    part = t'{col:literal} {direction:literal}'
+                    col_ref = _qualified_name(col, 'ORDER BY column name')
+                    part = t'{col_ref} {direction:literal}'
+                elif isinstance(col, Column):
+                    col_ref = _column_ref(col, with_alias=True)
+                    part = t'{col_ref} {direction:literal}'
                 else:
-                    # Column object - convert to string
                     col_str = str(col)
                     part = t'{col_str:unsafe} {direction:literal}'
 

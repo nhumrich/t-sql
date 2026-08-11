@@ -298,7 +298,14 @@ query = (Posts.select(Posts.title, Users.username)
 # LEFT JOIN
 query = (Posts.select()
          .left_join(Users, on=Posts.user_id == Users.id))
+
+# join_type= accepts only INNER, LEFT, RIGHT and FULL (the OUTER spellings normalize
+# to the bare keyword: 'LEFT OUTER' -> 'LEFT'). Anything else raises ValueError.
+query = Posts.select().join(Users, on=Posts.user_id == Users.id, join_type='FULL OUTER')
 ```
+
+`join()` always emits an `ON` clause, so `CROSS` is not in the allowlist — cross,
+lateral and vendor-specific joins go through `join_raw()`.
 
 ### Raw JOIN clauses (escape hatch)
 
@@ -397,6 +404,17 @@ query = Users.select().where(Users.username.not_ilike('%JOHN%'))
 query = Users.select().where(Users.age.between(18, 65))
 query = Users.select().where(Users.age.not_between(18, 65))
 
+# Condition() is public, and its operator is validated against exactly the set the
+# methods above emit: IS, IS NOT, =, !=, <, <=, >, >=, IN, NOT IN, LIKE, NOT LIKE,
+# ILIKE, NOT ILIKE, BETWEEN, NOT BETWEEN. Anything else raises ValueError, so a
+# ?field=&op=&value= filter endpoint cannot smuggle a predicate through op.
+from tsql.query_builder import Condition
+query = Users.select().where(Condition(Users.age, '>=', 21))
+
+# For a predicate the allowlist rejects, pass a Template to where() — the values are
+# still parameterized:
+query = Users.select().where(t'users.age IS DISTINCT FROM {21}')
+
 # ORDER BY
 query = Posts.select().order_by(Posts.id)  # defaults to ASC
 query = Posts.select().order_by(Posts.id.desc())
@@ -433,9 +451,77 @@ query = (Posts.select()
 > when every column already carries its own direction via `.asc()`/`.desc()` and the
 > keyword would have gone unused.
 >
-> Scope: this covers the `direction=` keyword and the `NULLS` ordering only. Column
-> aliases from `.as_()` are still emitted unvalidated, so do not build an alias from
-> user input — see [Danger Zones](#danger-zones-where-you-can-still-get-hurt).
+> Scope: 4.14.0 adds validation to the keyword and name parameters that were previously
+> rendered into the SQL text unvalidated. Each now raises `ValueError` naming the offending
+> value:
+>
+> - `order_by(..., direction=...)` — `'ASC'` / `'DESC'`, plus the `NULLS` ordering
+> - `Condition(left, operator, right)` — `left` must be a real `Column`; `operator` is one
+>   of the 16 the comparison API emits
+> - `join(..., join_type=...)` and `Join(...)` — `INNER` / `LEFT` / `RIGHT` / `FULL`
+> - `Column(table_name, column_name, alias, schema)`, and therefore `.as_()` — every one
+>   of the four name fields must be a single unqualified identifier (`'*'` is allowed as a
+>   column name, since `Table.ALL` is `Column(table_name, '*')`)
+> - `returning()`, `on_conflict_do_nothing()` / `on_conflict_update()` and `with_cte()` —
+>   each name is an identifier (`returning('*')` remains the wildcard form)
+>
+> So a `?field=&op=&value=` filter endpoint is now safe on all three inputs: resolve
+> `field` to a Column (`getattr(Users, field)`) and both the name and the operator are
+> checked for you.
+>
+> The two escape hatches for anything the allowlists reject are a t-string **Template**
+> (`where()`, `having()`, `select()`, `order_by()`, `group_by()`) and **`join_raw()`** for
+> non-standard join shapes. Both parameterize their interpolations. `:unsafe` remains the
+> only way to splice unvalidated text — see
+> [Danger Zones](#danger-zones-where-you-can-still-get-hurt).
+>
+> **Where the check happens.** `Column`, `Condition`, `Join` and `with_cte()` validate at
+> call time. The write-builder name lists (`returning()`, the `on_conflict_*` conflict
+> targets) and the string-builder path (`SelectQueryBuilder.from_table()`'s
+> `table_name`/`schema`/`alias`) are validated at render, so a bad value raises from
+> `.render()` rather than from the call that supplied it.
+>
+> **`:literal` is one identifier.** It used to accept a dotted name of up to three parts,
+> so `t'SELECT * FROM {table:literal}'` with `table='public.users'` rendered. Every part was
+> identifier-checked, so this was never an injection — but it let a single data-derived
+> value choose a schema the query never meant to reach. The qualifier now comes from the
+> code:
+>
+> ```python
+> # before
+> table = 'public.users'
+> tsql.render(t'SELECT * FROM {table:literal}')          # 4.14.0: ValueError
+>
+> # after — the dot belongs to the query, not to the value
+> schema, table = 'public', 'users'
+> tsql.render(t'SELECT * FROM {schema:literal}.{table:literal}')
+> ```
+>
+> The builder's own column-name arguments (`select()`, `group_by()`, `order_by()`,
+> `distinct_on()`) still take `'users.id'` and `'public.users.id'` — a column reference
+> cannot escape the query's scope, because the FROM clause already fixes which tables are
+> reachable. Table names cannot: use `schema=`.
+>
+> To mix a builder column into a raw t-string, splice the `Column` itself — it writes its
+> own dots and needs no format spec:
+>
+> ```python
+> # before: name_col = str(Users.name); t"{name_col:literal} LIKE {pattern}"
+> query.where(t"{Users.name} LIKE {pattern}")
+> ```
+>
+> **Breaking changes.** A `Table` subclass whose `table_name=` or `schema=` is not a bare
+> identifier now fails at class-definition time rather than at render: `table_name='my-table'`
+> previously raised from `.render()`, and now raises at import. A dot is likewise rejected —
+> `table_name='public.users'` becomes `table_name='users', schema='public'`.
+>
+> The column-remapping pattern (`Column(column_name='systemvar')`) is likewise restricted to
+> identifiers, so a legacy DB column containing a space, a hyphen, a `$`, or a leading digit
+> can no longer be mapped as a `Table` field.
+>
+> `Condition(left, ...)` now rejects a non-`Column` left operand, so code that passed a bare
+> string or a Template there must switch to a Column or move the whole predicate into
+> `where(t'...')`.
 
 ## Write Operations
 
@@ -634,10 +720,9 @@ query = Users.select(Users.id, Users.name, Users.email)
 query = query.where(Users.age > 18)
 
 # Add complex t-string condition for OR logic
+# A Column splices straight into a t-string — it writes its own qualified name
 search_term = "john"
-name_col = str(Users.name)
-email_col = str(Users.email)
-complex_condition = t"{name_col:literal} LIKE '%' || {search_term} || '%' OR {email_col:literal} LIKE '%' || {search_term} || '%'"
+complex_condition = t"{Users.name} LIKE '%' || {search_term} || '%' OR {Users.email} LIKE '%' || {search_term} || '%'"
 query = query.where(complex_condition)
 
 sql, params = query.render()
@@ -917,15 +1002,21 @@ sql, params = tsql.render(t"SELECT * FROM {table:literal} WHERE {col:literal} = 
 ```
 
 **Validation rules:**
-- Must be valid Python identifiers (`str.isidentifier()`)
-- Supports qualified names: `table.column` or `schema.table.column` (max 3 parts)
-- Rejects anything with spaces, quotes, or special characters
+- Must be a single valid Python identifier (`str.isidentifier()`)
+- Rejects anything with spaces, quotes, dots, or special characters
+
+A qualified name is written with the dot in the t-string, one `:literal` per part, so the
+qualifier comes from the query rather than from a value that may be data-derived:
+
+```python
+sql, params = tsql.render(t"SELECT * FROM {schema:literal}.{table:literal}")
+```
 
 ```python
 # These are REJECTED with ValueError:
 bad_table = "users; DROP TABLE secrets"  # Contains semicolon
 bad_col = "name' OR 1=1"  # Contains quote
-bad_schema = "schema.table.column.extra"  # Too many parts
+bad_schema = "public.users"  # Qualified — write the dot in the t-string
 
 tsql.render(t"SELECT * FROM {bad_table:literal}")  # Raises ValueError
 ```

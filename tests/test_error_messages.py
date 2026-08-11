@@ -12,17 +12,21 @@ def test_literal_non_string_gets_parameterized():
     assert params == [123]
 
 
-def test_literal_too_many_parts_error():
-    """Too many parts should show expected count and list all parts"""
+def test_literal_dotted_name_error():
+    """A dotted name says a literal is one identifier and shows where the dot belongs
+
+    This used to be a three-part cap with a "too many parts" message. A literal is now a
+    single identifier, so the count no longer matters and the message points at the
+    t-string as the place the qualifier is written.
+    """
     table = "a.b.c.d"
     with pytest.raises(ValueError) as exc_info:
         tsql.render(t"SELECT * FROM {table:literal}")
 
     error_msg = str(exc_info.value)
-    assert "too many parts" in error_msg
-    assert "expected at most 3" in error_msg
-    assert "got 4" in error_msg
-    assert "'a'" in error_msg and "'b'" in error_msg and "'c'" in error_msg and "'d'" in error_msg
+    assert "'a.b.c.d'" in error_msg
+    assert "single valid Python identifier" in error_msg
+    assert "write the dot in the t-string" in error_msg
 
 
 def test_literal_empty_string_error():

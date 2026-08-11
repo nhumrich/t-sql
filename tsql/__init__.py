@@ -96,27 +96,36 @@ class TSQL:
                 f"Use {{value}} without :literal to parameterize non-string values."
             )
 
-        # Allow qualified identifiers (table.column, schema.table.column)
-        parts = val.split('.')
-
-        if len(parts) > 3:
-            raise ValueError(
-                f"Invalid literal {val!r}: too many parts (expected at most 3 for schema.table.column, got {len(parts)}). "
-                f"Parts: {', '.join(repr(p) for p in parts)}"
-            )
-
-        # Check for empty string or empty parts
-        if not val or any(not p for p in parts):
+        # A literal is exactly one identifier. A dot used to be allowed here so a caller
+        # could splice 'public.users' as a single value, but that turns any data-derived
+        # name into a way to reach a table the query never intended: not an injection,
+        # since every part is still checked, but an escape from whatever scope the caller
+        # thought it was choosing within. Write the dot in the t-string instead --
+        # t'{schema:literal}.{table:literal}' -- so the qualifier comes from the code.
+        #
+        # Unbound `str.isidentifier`: a subclass can override the bound one to report a
+        # harmless shape while its real buffer, which is what gets spliced into the SQL
+        # text, carries a payload.
+        if not val:
             raise ValueError(
                 f"Invalid literal {val!r}: empty string is not a valid identifier. "
-                f"Literals must be valid Python identifiers (e.g., 'users', 'public.users', 'schema.table.column')."
+                f"Literals must be valid Python identifiers (e.g., 'users', 'user_id')."
             )
 
-        invalid_parts = [p for p in parts if not p.isidentifier()]
-        if invalid_parts:
+        if not str.isidentifier(val):
+            qualified = ""
+            if '.' in val:
+                bad = next((p for p in str.split(val, '.') if not str.isidentifier(p)), None)
+                qualified = (
+                    (f"Part {bad!r} is not an identifier. " if bad is not None else "")
+                    + "For a qualified name, write the dot in the t-string and splice each "
+                      "part separately (e.g. t'{schema:literal}.{table:literal}'). "
+                )
             raise ValueError(
-                f"Invalid literal {val!r}: contains invalid identifier(s): {', '.join(repr(p) for p in invalid_parts)}. "
-                f"Each part must be a valid Python identifier (letters, digits, underscores; cannot start with digit). "
+                f"Invalid literal {val!r}: invalid identifier. "
+                f"A literal must be a single valid Python identifier (letters, digits, underscores; cannot start with digit). "
+                f"{qualified}"
+                f"For a wildcard or a SQL expression, pass a t-string Template instead (e.g. t'*', t'users.*', t'COUNT(*)'). "
                 f"If you need special characters or SQL keywords, consider using {{value:unsafe}} with caution."
             )
         return val

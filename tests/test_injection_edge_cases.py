@@ -274,40 +274,30 @@ def test_valid_dictionary_keys_still_work():
     assert result2[1] == ["Bob", "Smith"]
 
 
-def test_literal_too_many_parts():
-    """Test that literals with more than 3 parts are rejected"""
-    # 4 parts should be rejected
-    four_part_literal = "a.b.c.d"
-    with pytest.raises(ValueError, match="too many parts"):
-        tsql.render(t"SELECT * FROM {four_part_literal:literal}")
+def test_literal_dotted_names_are_rejected():
+    """Test that a dotted literal is rejected however many parts it has
 
-    # 5 parts should be rejected
-    five_part_literal = "a.b.c.d.e"
-    with pytest.raises(ValueError, match="too many parts"):
-        tsql.render(t"SELECT * FROM {five_part_literal:literal}")
-
-    # Many parts should be rejected
-    many_parts_literal = ".".join(["a"] * 10)
-    with pytest.raises(ValueError, match="too many parts"):
-        tsql.render(t"SELECT * FROM {many_parts_literal:literal}")
+    A dotted literal used to be accepted up to three parts. Every part was checked, so
+    this was never an injection, but it let one data-derived value choose a schema the
+    query never meant to reach. The qualifier now has to come from the t-string.
+    """
+    for dotted in ["public.users", "mydb.public.users", "a.b.c.d", ".".join(["a"] * 10)]:
+        with pytest.raises(ValueError, match="single valid Python identifier"):
+            tsql.render(t"SELECT * FROM {dotted:literal}")
 
 
-def test_literal_valid_parts():
-    """Test that literals with 1-3 parts are accepted"""
-    # 1 part (simple table name)
+def test_literal_single_identifier_is_accepted():
+    """Test that a single identifier is what a literal accepts"""
     one_part = "users"
     result = tsql.render(t"SELECT * FROM {one_part:literal}")
     assert result[0] == "SELECT * FROM users"
     assert result[1] == []
 
-    # 2 parts (schema.table)
-    two_parts = "public.users"
-    result = tsql.render(t"SELECT * FROM {two_parts:literal}")
-    assert result[0] == "SELECT * FROM public.users"
-    assert result[1] == []
 
-    # 3 parts (database.schema.table or schema.table.column)
-    three_parts = "mydb.public.users"
-    result = tsql.render(t"SELECT * FROM {three_parts:literal}")
-    assert result[0] == "SELECT * FROM mydb.public.users"
+def test_qualified_name_is_written_in_the_tstring():
+    """Test that the replacement for a dotted literal renders the same SQL"""
+    schema = "public"
+    table = "users"
+    result = tsql.render(t"SELECT * FROM {schema:literal}.{table:literal}")
+    assert result[0] == "SELECT * FROM public.users"
     assert result[1] == []

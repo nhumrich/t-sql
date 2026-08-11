@@ -211,10 +211,7 @@ def test_mixing_query_builder_with_tsql():
     # Add complex t-string condition for advanced logic
     search_term = "john"
     min_age = 25
-    name_col = str(Users.name)
-    email_col = str(Users.email)
-    age_col = str(Users.age)
-    advanced_condition = t"({name_col:literal} LIKE '%' || {search_term} || '%' OR {email_col:literal} LIKE '%' || {search_term} || '%') AND {age_col:literal} >= {min_age}"
+    advanced_condition = t"({Users.name} LIKE '%' || {search_term} || '%' OR {Users.email} LIKE '%' || {search_term} || '%') AND {Users.age} >= {min_age}"
 
     # Mix it into the query builder - just pass the t-string directly!
     query_with_tsql = query.where(advanced_condition)

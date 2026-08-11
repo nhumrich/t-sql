@@ -17,10 +17,11 @@
   ],
   "rules": [
     "CRITICAL: This library requires Python 3.14+ due to PEP 750 t-strings. Never suggest it for older Python versions.",
-    "Install with 'uv add t-sql' or 'pip install t-sql'. Use 't-sql[sqlalchemy]' for SQLAlchemy/Alembic integration.",
+    "Install with 'uv add t-sql' or 'pip install t-sql'. The 't-sql[sqlalchemy]' extra installs SQLAlchemy only; add 'alembic' to your own project if you use autogenerate.",
     "Always use t-strings (t\"...\") not regular strings (\"\") or f-strings (f\"\"\") for SQL queries. The library is designed so raw strings won't work - this prevents SQL injection by design.",
     "Use the query builder (@table decorator with typed columns) for complex multi-table joins and structured queries. Use t-string templating for simpler queries or custom SQL logic that the query builder doesn't support.",
-    "The :literal format spec is for dynamic table/column names that cannot be parameterized. It sanitizes against valid SQL identifiers.",
+    "The :literal format spec is for dynamic table/column names that cannot be parameterized. As of 4.14.0 it takes a single unqualified identifier - a dotted name like 'public.users' raises ValueError. The qualifier belongs to the query, not the value: t'SELECT * FROM {schema:literal}.{table:literal}'. The query builder's own column-name arguments (select(), group_by(), order_by(), distinct_on()) still accept qualified names like 'users.id'.",
+    "As of 4.14.0 identifiers and keywords are allowlisted and raise ValueError when rejected: Column name fields (table_name, column_name, alias, schema) and .as_(), Condition operators, join_type (INNER/LEFT/RIGHT/FULL), and order_by direction (ASC/DESC). When a shape is rejected, reach for a t-string Template (where(), having(), select(), order_by(), group_by()) or join_raw() - both parameterize their interpolations. Do not reach for :unsafe.",
     "The :unsafe format spec bypasses all safety checks. Only use with hardcoded strings, never with user input.",
     "The :as_values format spec converts dicts to INSERT VALUES format. The :as_set format spec converts dicts to UPDATE SET format.",
     "When mixing query builder with t-strings using .where(), t-string conditions are automatically wrapped in parentheses for proper operator precedence.",

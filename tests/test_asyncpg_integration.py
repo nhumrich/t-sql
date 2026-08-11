@@ -489,3 +489,43 @@ async def test_insert_all_defaults_with_returning(conn):
         assert row['status'] == 'draft'
     finally:
         await conn.execute("DROP TABLE IF EXISTS test_defaults")
+
+async def test_order_by_direction_injection_raises_before_query(conn):
+    """The exfiltration payload raises at build time, before anything reaches the driver."""
+    from tsql.query_builder import Table, Column
+
+    class TestUsers(Table, table_name='test_users'):
+        id: Column
+        name: Column
+        age: Column
+
+    payload = 'ASC, (SELECT CASE WHEN EXISTS (SELECT 1 FROM test_users) THEN 1 ELSE 0 END)'
+    with pytest.raises(ValueError):
+        TestUsers.select().order_by(TestUsers.id, direction=payload)
+
+
+async def test_order_by_nulls_last_against_real_rows(conn):
+    """NULLS FIRST/LAST actually orders NULLs correctly in postgres."""
+    from tsql.query_builder import Table, Column
+
+    class TestUsers(Table, table_name='test_users'):
+        id: Column
+        name: Column
+        age: Column
+
+    await conn.execute(
+        "INSERT INTO test_users (name, age) VALUES ('a', 1), ('b', NULL), ('c', 3)"
+    )
+
+    query, params = TestUsers.select('name').order_by(
+        TestUsers.age.desc().nulls_last()
+    ).render(style=tsql.styles.NUMERIC_DOLLAR)
+    assert 'ORDER BY test_users.age DESC NULLS LAST' in query
+    rows = await conn.fetch(query, *params)
+    assert [r['name'] for r in rows] == ['c', 'a', 'b']
+
+    query, params = TestUsers.select('name').order_by(
+        TestUsers.age.desc().nulls_first()
+    ).render(style=tsql.styles.NUMERIC_DOLLAR)
+    rows = await conn.fetch(query, *params)
+    assert [r['name'] for r in rows] == ['b', 'c', 'a']

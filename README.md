@@ -402,6 +402,14 @@ query = Posts.select().order_by(Posts.id)  # defaults to ASC
 query = Posts.select().order_by(Posts.id.desc())
 query = Posts.select().order_by(Posts.created_at.asc(), Posts.id.desc())
 
+# NULLS ordering
+query = Posts.select().order_by(Posts.created_at.desc().nulls_last())
+query = Posts.select().order_by(Posts.created_at.asc().nulls_first())
+
+# The `direction=` keyword accepts only 'ASC' or 'DESC'; anything else raises
+# ValueError. Use .nulls_first()/.nulls_last() or a Template for richer ordering.
+query = Posts.select().order_by('created_at', direction='DESC')
+
 # ORDER BY / GROUP BY also accept raw Templates, emitted verbatim
 # (parity with where()/having()/select()), for computed expressions:
 query = Posts.select().order_by(t'lower(title) DESC')
@@ -415,6 +423,19 @@ query = (Posts.select()
          .group_by(Posts.user_id)
          .having(t'COUNT(*) > {min_count}'))
 ```
+
+> Breaking change (4.14.0): `order_by(..., direction=...)` now validates its argument and
+> accepts only `'ASC'` or `'DESC'`. Previously the string was interpolated into the SQL
+> unvalidated, so an app passing user input straight through to `direction=` had an
+> injection sink. Undocumented forms such as `direction='DESC NULLS LAST'` now raise
+> `ValueError` — use `.nulls_last()` or `order_by(t'created_at DESC NULLS LAST')` instead.
+> Validation is eager: `direction=` is checked on every call, so a bad value raises even
+> when every column already carries its own direction via `.asc()`/`.desc()` and the
+> keyword would have gone unused.
+>
+> Scope: this covers the `direction=` keyword and the `NULLS` ordering only. Column
+> aliases from `.as_()` are still emitted unvalidated, so do not build an alias from
+> user input — see [Danger Zones](#danger-zones-where-you-can-still-get-hurt).
 
 ## Write Operations
 

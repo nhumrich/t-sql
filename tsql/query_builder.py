@@ -37,14 +37,79 @@ except ImportError:
     SAColumnType = None
 
 
-class OrderByClause:
-    """Represents a column with an ORDER BY direction (ASC/DESC)"""
+_VALID_DIRECTIONS = frozenset({'ASC', 'DESC'})
+_VALID_NULLS = frozenset({'NULLS FIRST', 'NULLS LAST'})
 
-    def __init__(self, column: 'Column', direction: str):
+
+def _validate_keyword(value: Any, allowed: frozenset[str], field: str, hint: str) -> str:
+    """Normalize a caller-supplied SQL keyword and reject anything outside `allowed`.
+
+    Keyword values cross the API boundary as plain strings and are rendered into the
+    SQL text rather than parameterized, so membership in `allowed` is the control that
+    makes them safe. `hint` must never point callers at `:unsafe`.
+    """
+    # Unbound str methods, so a str subclass cannot override strip/upper/__eq__ to
+    # pass the check while its real buffer carries a payload. These return a plain
+    # str, which is what gets stored and rendered.
+    normalized = str.upper(str.strip(value)) if isinstance(value, str) else None
+    if normalized not in allowed:
+        raise ValueError(
+            f"Invalid {field} {value!r}: must be one of "
+            f"{', '.join(repr(a) for a in sorted(allowed))}. {hint}"
+        )
+    return normalized
+
+
+def _validate_direction(direction: str) -> str:
+    return _validate_keyword(
+        direction,
+        _VALID_DIRECTIONS,
+        'ORDER BY direction',
+        "For NULLS ordering use .nulls_first() / .nulls_last() "
+        "(e.g. Users.id.desc().nulls_last()). For any other expression pass a "
+        "t-string Template to order_by().",
+    )
+
+
+def _validate_nulls(nulls: Optional[str]) -> Optional[str]:
+    if nulls is None:
+        return None
+    return _validate_keyword(
+        nulls,
+        _VALID_NULLS,
+        'ORDER BY NULLS ordering',
+        "Prefer the .nulls_first() / .nulls_last() methods. For any other "
+        "expression pass a t-string Template to order_by().",
+    )
+
+
+class OrderByClause:
+    """Represents a column with an ORDER BY direction (ASC/DESC) and optional NULLS ordering"""
+
+    def __init__(self, column: 'Column', direction: str, nulls: Optional[str] = None):
         self.column = column
-        self.direction = direction.upper()
+        self.direction = _validate_direction(direction)
+        self.nulls = _validate_nulls(nulls)
+
+    def nulls_first(self) -> 'OrderByClause':
+        """Return a new clause that orders NULLs before non-NULLs
+
+        Example:
+            Users.select().order_by(Users.created_at.asc().nulls_first())
+        """
+        return OrderByClause(self.column, self.direction, 'NULLS FIRST')
+
+    def nulls_last(self) -> 'OrderByClause':
+        """Return a new clause that orders NULLs after non-NULLs
+
+        Example:
+            Users.select().order_by(Users.created_at.desc().nulls_last())
+        """
+        return OrderByClause(self.column, self.direction, 'NULLS LAST')
 
     def __repr__(self) -> str:
+        if self.nulls:
+            return f"OrderByClause({self.column!r}, {self.direction!r}, {self.nulls!r})"
         return f"OrderByClause({self.column!r}, {self.direction!r})"
 
 
@@ -201,6 +266,7 @@ class Column:
 
         Example:
             Users.select().order_by(Users.username.asc())
+            Users.select().order_by(Users.created_at.asc().nulls_first())
         """
         return OrderByClause(self, 'ASC')
 
@@ -212,6 +278,7 @@ class Column:
 
         Example:
             Users.select().order_by(Users.created_at.desc())
+            Users.select().order_by(Users.created_at.desc().nulls_last())
         """
         return OrderByClause(self, 'DESC')
 
@@ -1170,7 +1237,7 @@ class SelectQueryBuilder(QueryBuilder):
         self._joins: List[Union[Join, Template]] = []
         self._group_by_columns: List[Union[Column, Template, str]] = []
         self._having_conditions: List[Union[Condition, Template]] = []
-        self._order_by_columns: List[tuple[Union[Column, Template, str], str]] = []
+        self._order_by_columns: List[tuple[Union[Column, Template, str], str, Optional[str]]] = []
         self._limit_value: Optional[int] = None
         self._offset_value: Optional[int] = None
         self._ctes: List[tuple[str, Union[Template, TSQL, 'SelectQueryBuilder'], bool]] = []
@@ -1297,7 +1364,13 @@ class SelectQueryBuilder(QueryBuilder):
             columns: Column objects, OrderByClause objects (from .asc()/.desc()), raw
                 t-string Templates (emitted verbatim — bake the direction in yourself),
                 or string column names
-            direction: Sort direction ('ASC' or 'DESC') for columns that don't have explicit direction
+            direction: Sort direction for columns that don't have explicit direction.
+                Only 'ASC' or 'DESC' are accepted; anything else raises ValueError.
+                For NULLS ordering use .nulls_first() / .nulls_last(); for any richer
+                expression pass a t-string Template.
+
+        Raises:
+            ValueError: if direction is not 'ASC' or 'DESC'
 
         Examples:
             # Using .asc() and .desc() methods
@@ -1309,15 +1382,22 @@ class SelectQueryBuilder(QueryBuilder):
             # String-based ordering with explicit direction
             SelectQueryBuilder.from_table('users').order_by('username', direction='DESC')
 
+            # NULLS ordering
+            Users.select().order_by(Users.created_at.desc().nulls_last())
+
+            # Anything else: a raw Template, emitted verbatim
+            Users.select().order_by(t'created_at DESC NULLS LAST')
+
             # Multiple columns in one call
             Users.select().order_by(Users.username, Users.id.desc())
         """
+        direction = _validate_direction(direction)
         for column in columns:
             if isinstance(column, OrderByClause):
-                self._order_by_columns.append((column.column, column.direction))
+                self._order_by_columns.append((column.column, column.direction, column.nulls))
             else:
                 # Column or string with direction
-                self._order_by_columns.append((column, direction.upper()))
+                self._order_by_columns.append((column, direction, None))
         return self
 
     def group_by(self, *columns: Union[Column, Template, str]) -> 'SelectQueryBuilder':
@@ -1511,17 +1591,27 @@ class SelectQueryBuilder(QueryBuilder):
 
         if self._order_by_columns:
             order_parts = []
-            for col, direction in self._order_by_columns:
+            for col, direction, nulls in self._order_by_columns:
                 if isinstance(col, Template):
                     # Raw fragment is self-contained (direction baked in); emit verbatim
                     order_parts.append(col)
-                elif isinstance(col, str):
+                    continue
+
+                if isinstance(col, str):
                     # String column name - validate with :literal
-                    order_parts.append(t'{col:literal} {direction:unsafe}')
+                    part = t'{col:literal} {direction:literal}'
                 else:
                     # Column object - convert to string
                     col_str = str(col)
-                    order_parts.append(t'{col_str:unsafe} {direction:unsafe}')
+                    part = t'{col_str:unsafe} {direction:literal}'
+
+                if nulls is not None:
+                    # Re-validated here because the render uses :unsafe (:literal rejects
+                    # the space), so this needs the same second gate :literal gives
+                    # direction — the attribute is public and may have been reassigned.
+                    nulls = _validate_nulls(nulls)
+                    part = t'{part} {nulls:unsafe}'
+                order_parts.append(part)
             order_by_template = t_join(t', ', order_parts)
             parts.append(t'ORDER BY {order_by_template}')
 

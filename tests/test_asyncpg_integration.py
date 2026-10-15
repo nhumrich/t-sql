@@ -529,3 +529,24 @@ async def test_order_by_nulls_last_against_real_rows(conn):
     ).render(style=tsql.styles.NUMERIC_DOLLAR)
     rows = await conn.fetch(query, *params)
     assert [r['name'] for r in rows] == ['b', 'c', 'a']
+
+
+async def test_empty_in_and_not_in_against_postgres(conn):
+    """Postgres rejects `IN ()`; empty IN/NOT IN must parse and filter correctly."""
+    from tsql.query_builder import Table, Column
+
+    class TestUsers(Table, table_name='test_users'):
+        id: Column
+        name: Column
+
+    await conn.execute("INSERT INTO test_users (name) VALUES ('a'), ('b')")
+
+    query, params = TestUsers.select('name').where(
+        TestUsers.id.in_([])
+    ).render(style=tsql.styles.NUMERIC_DOLLAR)
+    assert await conn.fetch(query, *params) == []
+
+    query, params = TestUsers.select('name').where(
+        TestUsers.id.not_in([])
+    ).render(style=tsql.styles.NUMERIC_DOLLAR)
+    assert len(await conn.fetch(query, *params)) == 2

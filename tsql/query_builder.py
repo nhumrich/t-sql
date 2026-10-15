@@ -756,6 +756,9 @@ class Condition:
                 elif isinstance(self.right, Column):
                     right_str = str(self.right)
                     return t'{left_str:unsafe} {self.operator:unsafe} ({right_str:unsafe})'
+                # `IN ()` is invalid SQL in Postgres/MySQL
+                elif isinstance(self.right, (list, tuple)) and not self.right:
+                    return t'FALSE' if self.operator == 'IN' else t'TRUE'
                 # Otherwise it's a tuple/list of values
                 else:
                     right_val = self.right

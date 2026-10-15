@@ -455,3 +455,23 @@ async def test_insert_all_defaults_with_returning(conn):
     row = await cursor.fetchone()
     assert row[0] is not None
     assert row[1] == 'draft'
+
+
+async def test_empty_in_and_not_in(conn):
+    """SQLite accepts `IN ()`, so this only proves TRUE/FALSE run and filter correctly"""
+    class TestUsers(Table, table_name='test_users'):
+        id: int
+        name: str
+
+    for name in ('Alice', 'Bob'):
+        sql, params = TestUsers.insert(name=name).render()
+        await conn.execute(sql, params)
+    await conn.commit()
+
+    sql, params = TestUsers.select().where(TestUsers.id.in_([])).render()
+    cursor = await conn.execute(sql, params)
+    assert await cursor.fetchall() == []
+
+    sql, params = TestUsers.select().where(TestUsers.id.not_in([])).render()
+    cursor = await conn.execute(sql, params)
+    assert len(await cursor.fetchall()) == 2

@@ -1879,3 +1879,61 @@ def test_group_by_mixed_template_and_column():
 
     assert sql == 'SELECT users.id FROM users GROUP BY users.id, lower(users.email)'
     assert params == []
+
+
+def test_where_with_empty_in_renders_false():
+    """Empty IN matches no rows; `IN ()` is invalid SQL"""
+    query = Users.select().where(Users.id.in_([]))
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM users WHERE FALSE'
+    assert params == []
+
+
+def test_where_with_empty_not_in_renders_true():
+    """Empty NOT IN matches all rows; `NOT IN ()` is invalid SQL"""
+    query = Users.select().where(Users.id.not_in([]))
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM users WHERE TRUE'
+    assert params == []
+
+
+def test_where_with_empty_in_tuple():
+    query = Users.select().where(Users.id.in_(()))
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM users WHERE FALSE'
+    assert params == []
+
+
+def test_direct_condition_with_empty_in():
+    query = Users.select().where(Condition(Users.id, 'IN', ()))
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM users WHERE FALSE'
+    assert params == []
+
+
+def test_direct_condition_with_empty_in_list():
+    query = Users.select().where(Condition(Users.id, 'NOT IN', []))
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM users WHERE TRUE'
+    assert params == []
+
+
+def test_empty_in_combined_with_other_condition():
+    query = Users.select().where(Users.id.in_([])).where(Users.username == 'bob')
+    sql, params = query.render()
+
+    assert sql == 'SELECT * FROM users WHERE FALSE AND users.username = ?'
+    assert params == ['bob']
+
+
+def test_non_empty_in_unchanged():
+    query = Users.select().where(Users.id.in_([1, 2]))
+    sql, params = query.render()
+
+    assert 'WHERE users.id IN (?,?)' in sql
+    assert params == [1, 2]
